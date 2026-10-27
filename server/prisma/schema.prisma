@@ -1,0 +1,514 @@
+// Omek Leads database schema (MongoDB, Prisma 6).
+// Lead ids come from the client (UUIDs), so new leads show instantly and a retried request can't duplicate one.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+/// The sales funnel, in order. A lead moves forward one stage at a time.
+enum Stage {
+  cold_call
+  zoom
+  closed
+}
+
+enum ContactMethod {
+  call
+  whatsapp
+}
+
+enum Currency {
+  ILS
+  USD
+}
+
+enum ActivityType {
+  advanced
+  no_answer
+  archived
+  answered
+}
+
+enum InteractionKind {
+  call
+  zoom
+  whatsapp
+  email
+  note
+}
+
+enum InteractionOutcome {
+  no_answer
+  answered
+  held
+  no_show
+}
+
+enum MediaKind {
+  audio
+  video
+}
+
+/// Where a timeline entry came from, when it wasn't typed in the app
+enum InteractionSource {
+  /// Mirrored, read-only, from the linked WhatsApp account (src/whatsapp)
+  whatsapp
+}
+
+enum ChatLineType {
+  text
+  voice
+  audio
+  image
+  video
+  document
+  sticker
+  location
+  contact
+  poll
+  reaction
+  call
+  other
+}
+
+/// One message in a WhatsApp conversation mirrored onto the timeline (one entry per lead per day)
+type ChatLine {
+  /// WhatsApp's id for the message
+  id         String
+  at         DateTime
+  /// Sent from your phone (or another device on your number); otherwise sent by the lead
+  fromMe     Boolean
+  type       ChatLineType
+  /// The text, a caption, or a short description such as "Location: Tiberias"
+  text       String
+  /// Voice notes and audio: length in seconds
+  seconds    Int?
+  /// Voice notes: the recording kept for it (Media id), once downloaded
+  mediaId    String?
+  /// Why a voice note couldn't be downloaded
+  mediaError String?
+  /// Voice notes: the automatic transcript
+  transcript String?
+  edited     Boolean
+  deleted    Boolean
+  /// What's needed to download the voice note later. Stays on the server.
+  ref        String?
+}
+
+/// Where a recording's automatic transcript stands
+enum TranscriptStatus {
+  queued
+  running
+  done
+  failed
+}
+
+/// The automatic transcript job of one recording. The text also goes into its timeline entry's body.
+type Transcription {
+  status     TranscriptStatus
+  /// Parts of the recording sent so far, out of partsTotal (0 while the audio is being prepared)
+  partsDone  Int
+  partsTotal Int
+  /// Runs started, so a job that keeps failing stops being retried after a restart
+  attempts   Int
+  /// Why it failed, in words for the timeline
+  error      String?
+  /// The finished transcript, kept so a retried job never adds it to the entry twice
+  text       String?
+  words      Int
+  updatedAt  DateTime
+}
+
+/// The lead's values from before an action, so the action can be undone
+type ActivityBefore {
+  stageChangedAt DateTime
+  lastAttemptAt  DateTime?
+  attemptCount   Int
+}
+
+/// One logged step: a call with no answer, a move to the next stage, or "not relevant"
+type Activity {
+  id     String
+  type   ActivityType
+  at     DateTime
+  from   Stage
+  to     Stage?
+  before ActivityBefore
+}
+
+/// What a closed deal brings in, in whole units of the lead's currency: a web studio's three kinds of income.
+type DealTerms {
+  /// One-time payment for building the site
+  setupFee        Int
+  /// Ongoing maintenance and management, per month
+  monthlyRetainer Int
+  /// Domain and hosting, renewed every year
+  hostingYearly   Int
+}
+
+model Lead {
+  id             String        @id @map("_id")
+  name           String
+  contactName    String        @default("")
+  phone          String        @default("")
+  email          String        @default("")
+  website        String        @default("")
+  /// Topic or niche of the batch the lead came in with, e.g. "Dentists"
+  campaign       String        @default("")
+  /// How to talk to this lead
+  approach       String        @default("")
+  method         ContactMethod
+  stage          Stage         @default(cold_call)
+  stageChangedAt DateTime      @default(now())
+  /// Set when the lead is marked not relevant. Archived leads never return to the daily pool.
+  archivedAt     DateTime?
+  attemptCount   Int           @default(0)
+  lastAttemptAt  DateTime?
+  /// Only a closed deal has amounts; all zero until then. Missing on leads stored before deal terms existed.
+  deal           DealTerms?
+  /// Before deal terms, a closed deal had one amount. It reads as the deal's setup fee until the amounts or the stage are next saved, which removes it.
+  legacyValue    Int?          @map("value")
+  currency       Currency      @default(ILS)
+  /// Workflow steps, newest first. Powers undo and the daily queue; the timeline lives in Interaction.
+  activity       Activity[]
+  interactions   Interaction[]
+  media          Media[]
+  coaching       CoachingReport[]
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@index([stage])
+  @@index([campaign])
+  @@index([createdAt])
+  @@map("leads")
+}
+
+/// One event on a lead's timeline: a call, a Zoom meeting, a WhatsApp message, an email or a note.
+/// Workflow steps create one with the same id as the step, so undoing the step removes it.
+model Interaction {
+  id        String              @id @map("_id")
+  leadId    String
+  lead      Lead                @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  kind      InteractionKind
+  outcome   InteractionOutcome?
+  /// Notes or a transcript of what was said
+  body      String              @default("")
+  /// The workflow step this interaction recorded, if any
+  step      ActivityType?
+  /// The stage the lead was at, and the stage it moved to
+  stage     Stage
+  stageTo   Stage?
+  at        DateTime
+  /// Null for entries logged in the app. Mirrored entries can't be edited or deleted here.
+  source    InteractionSource?
+  /// A mirrored WhatsApp conversation, oldest message first. `body` holds the same conversation as text.
+  chat      ChatLine[]
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+
+  @@index([leadId, at])
+  @@map("interactions")
+}
+
+/// A call or meeting recording, attached to a lead and optionally to one interaction.
+/// The file itself lives in MEDIA_STORAGE (a local folder or an S3 bucket) under `storageKey`.
+model Media {
+  id            String    @id @map("_id")
+  leadId        String
+  lead          Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  interactionId String?
+  kind          MediaKind
+  fileName      String
+  mimeType      String
+  size          Int
+  storageKey    String
+  /// Null when no transcript was asked for (transcription off, or uploaded before it existed)
+  transcription Transcription?
+  createdAt     DateTime  @default(now())
+
+  @@index([leadId])
+  @@index([interactionId])
+  @@map("media")
+}
+
+/// One AI coaching analysis of a lead, kept so it can be read again without paying for it twice.
+model CoachingReport {
+  id               String   @id @default(auto()) @map("_id") @db.ObjectId
+  leadId           String
+  lead             Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  provider         String
+  model            String
+  /// Interactions the analysis was based on
+  interactionCount Int
+  /// The structured analysis, validated against src/coach/schema.ts before it is stored
+  analysis         Json
+  createdAt        DateTime @default(now())
+
+  @@index([leadId, createdAt])
+  @@map("coaching_reports")
+}
+
+/// The leads drawn for one day's calls. `date` is the day in APP_TIMEZONE, like "2026-10-22".
+model DailyQueue {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  date      String   @unique
+  leadIds   String[]
+  /// Bumped on every change, so two devices can't top up the same day twice
+  version   Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("daily_queues")
+}
+
+enum ObjectionCategory {
+  price
+  timing
+  trust
+  need
+  authority
+  competition
+  /// "My nephew builds websites", "I'll do it on Wix"
+  diy
+  other
+}
+
+/// Where an objection was heard: one quote from one lead's timeline
+type ObjectionSource {
+  leadId        String
+  leadName      String
+  interactionId String
+  at            DateTime
+  /// The prospect's words, as transcribed or noted
+  quote         String
+}
+
+/// Spaced repetition (Leitner boxes): box 1 comes up every session, box 5 every two weeks
+type PracticeState {
+  box            Int
+  dueAt          DateTime
+  reviews        Int
+  /// Times it was graded "Missed"
+  lapses         Int
+  /// 1 missed, 2 hard, 3 good, 4 easy
+  lastGrade      Int?
+  lastReviewedAt DateTime?
+}
+
+/// A flashcard for objection training: an objection prospects keep raising, and how to answer it.
+/// Built by the AI coach from past call transcripts, WhatsApp conversations and notes.
+model ObjectionCard {
+  id           String            @id @map("_id")
+  /// Stable across analyses ("price-too-high"), so a fresh analysis updates the card instead of adding a copy
+  key          String            @unique
+  category     ObjectionCategory
+  /// The objection as prospects say it
+  objection    String
+  /// What usually sits behind it
+  insight      String
+  /// The answer to practise, in spoken words
+  response     String
+  alternatives String[]
+  /// A question that keeps the conversation going after the answer
+  followUp     String
+  /// Leads that raised it, and how many times it came up
+  leadCount    Int
+  mentions     Int
+  sources      ObjectionSource[]
+  /// Your own version of the answer
+  myResponse   String            @default("")
+  practice     PracticeState
+  /// No longer found by the latest analysis; kept with its practice history
+  retired      Boolean           @default(false)
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  @@map("objection_cards")
+}
+
+/// A card's answer tailored to one niche ("מסעדות", "עורכי דין"): the same objection, answered in the terms
+/// that kind of business uses. Written by the AI coach for every card at once, and replaced when tailored again.
+model ObjectionVariant {
+  id           String   @id @map("_id")
+  /// The niche as compared (src/training/niche.ts): the campaign without the area, in lowercase
+  niche        String
+  /// The niche as it was written
+  label        String
+  /// The card it tailors (ObjectionCard.key)
+  cardKey      String
+  /// How an owner in this niche says it
+  objection    String
+  insight      String
+  response     String
+  alternatives String[]
+  followUp     String
+  provider     String
+  model        String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([niche, cardKey])
+  @@index([updatedAt])
+  @@map("objection_variants")
+}
+
+/// One analysis of past conversations that built or refreshed the objection deck
+model TrainingRun {
+  id              String   @id @default(auto()) @map("_id") @db.ObjectId
+  provider        String
+  model           String
+  language        String
+  leadsAnalyzed   Int
+  entriesAnalyzed Int
+  /// Call transcripts and WhatsApp conversations among the entries
+  conversations   Int
+  cards           Int
+  createdAt       DateTime @default(now())
+
+  @@index([createdAt])
+  @@map("training_runs")
+}
+
+/// Chats seen on the linked WhatsApp account. Only the chat's id, number and last message's id and time are kept
+/// (never its text), so a lead added later can ask your phone for the conversation.
+model WhatsAppChat {
+  /// The chat as WhatsApp addresses it: 972541234567@s.whatsapp.net, or a privacy id ending in @lid
+  id         String   @id @map("_id")
+  /// International digits, when known
+  phone      String?
+  lastId     String
+  lastFromMe Boolean
+  lastAt     DateTime
+  updatedAt  DateTime @updatedAt
+
+  @@index([phone])
+  @@map("whatsapp_chats")
+}
+
+/// The linked device's credentials and encryption keys, each sealed with WHATSAPP_AUTH_KEY (AES-256-GCM).
+/// Deleting them unlinks this server.
+model WhatsAppAuth {
+  /// "creds", or a key's type and id
+  id        String   @id @map("_id")
+  value     String
+  updatedAt DateTime @updatedAt
+
+  @@map("whatsapp_auth")
+}
+
+enum ProspectSearchStatus {
+  discovering
+  analyzing
+  done
+  failed
+  cancelled
+}
+
+/// A Prospector search: a niche and an area, and how far the check of the businesses it found has got.
+/// Deleted with its results after PROSPECTOR_RETENTION_DAYS (30 by default); leads imported from it stay.
+model ProspectSearch {
+  id           String               @id @map("_id")
+  niche        String
+  location     String
+  /// The text sent to the search provider
+  query        String
+  /// google or serpapi: the one that found the businesses (most of them, when both did)
+  provider     String
+  /// The provider first in line, when the other one had to take over (out of searches, a refused key, down)
+  fallbackFrom String?
+  /// What happened, in words for the app, when it wasn't a plain search
+  notice       String?
+  limit        Int
+  /// The language the AI writes in: he or en
+  language     String
+  status       ProspectSearchStatus
+  error        String?
+  /// Businesses found, after dropping permanently closed ones
+  found        Int                  @default(0)
+  createdAt    DateTime             @default(now())
+  finishedAt   DateTime?
+  updatedAt    DateTime             @updatedAt
+
+  @@index([createdAt])
+  @@index([status])
+  @@map("prospect_searches")
+}
+
+/// A business a Prospector search found, and the check of its website
+model Prospect {
+  id             String           @id @map("_id")
+  searchId       String
+  /// Google's place id
+  placeId        String
+  /// Order in the provider's results
+  position       Int
+  name           String
+  /// As written locally ("03-555-0101"), and as international digits for matching leads
+  phone          String           @default("")
+  phoneIntl      String           @default("")
+  website        String           @default("")
+  /// The website's host without "www.", for spotting the same site twice
+  domain         String           @default("")
+  address        String           @default("")
+  mapsUrl        String           @default("")
+  category       String           @default("")
+  rating         Float?
+  reviews        Int?
+  /// Temporarily closed, per Google
+  closed         Boolean          @default(false)
+  /// The owner never claimed the Google listing (SerpApi only)
+  unclaimed      Boolean          @default(false)
+  /// A lead already in the CRM with this number or website
+  existingLeadId String?
+  importedLeadId String?
+  importedAt     DateTime?
+  analysis       ProspectAnalysis
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  @@unique([searchId, placeId])
+  @@index([searchId, position])
+  @@index([domain])
+  @@map("prospects")
+}
+
+/// The check of a prospect's website and its need score (src/prospector/types.ts)
+type ProspectAnalysis {
+  /// pending, checking, scoring, done, failed or skipped
+  status        String
+  /// none, social, broken, blocked or ok
+  siteState     String?
+  /// 1–5: 5 has no working site, 1 already has a premium one
+  score         Int?
+  ruleScore     Int?
+  /// rules or ai
+  scoredBy      String?
+  verdict       String    @default("")
+  reasons       String[]
+  pitch         String    @default("")
+  confidence    String?
+  /// What the homepage showed (SiteSignals)
+  signals       Json?
+  /// The phone-sized screenshot, in media storage
+  screenshotKey String?
+  error         String?
+  analyzedAt    DateTime?
+  reusedFrom    String?
+}
+
+/// Sign-in sessions. Only a SHA-256 hash of the cookie token is stored.
+model Session {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  tokenHash String   @unique
+  userAgent String   @default("")
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+
+  @@index([expiresAt])
+  @@map("sessions")
+}

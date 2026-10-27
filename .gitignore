@@ -1,0 +1,12 @@
+# Dependencies and builds
+node_modules
+dist
+
+# Local settings and secrets (server/.env.example is the template to copy)
+.env
+.env.local
+
+# The Vercel CLI's link to your project
+.vercel
+
+*.log
