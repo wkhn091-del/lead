@@ -1,0 +1,31 @@
+# Local MongoDB for development and tests: docker compose up -d --wait
+# Prisma needs MongoDB to run as a replica set, so this starts a one-node set (rs0).
+services:
+  mongo:
+    image: mongo:8
+    restart: unless-stopped
+    command: ['--replSet', 'rs0', '--bind_ip_all', '--port', '27017']
+    ports:
+      # Local only: this development database has no password.
+      - '127.0.0.1:27017:27017'
+    volumes:
+      - omek-leads-mongo:/data/db
+    healthcheck:
+      # Creates the replica set the first time the container starts, then reports healthy once this node is
+      # the primary, so `--wait` returns when the database takes writes. The script is one quoted string:
+      # unquoted, YAML reads its "_id: 'rs0'" pairs as YAML and refuses the file.
+      test:
+        - CMD
+        - mongosh
+        - --port
+        - '27017'
+        - --quiet
+        - --eval
+        - "try { rs.status() } catch (error) { rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: 'localhost:27017' }] }) } if (!db.hello().isWritablePrimary) quit(1)"
+      interval: 5s
+      timeout: 30s
+      start_period: 5s
+      retries: 30
+
+volumes:
+  omek-leads-mongo:

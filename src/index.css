@@ -1,0 +1,663 @@
+@import 'tailwindcss';
+
+/*
+  Omek Leads: the lake by day and by night.
+  Layout: one centered column. A summary slab (pipeline value, revenue, lead count) opens the page,
+  then a sticky search and filter bar sits over the lead list. Lead status carries the color;
+  the chrome stays a quiet lake blue-grey.
+*/
+
+/*
+  Tailwind 4 keeps its configuration here, in CSS. The app reads right to left (index.html sets dir="rtl"),
+  so layouts use logical utilities (ms-/me-, ps-/pe-, start-/end-, text-start, rounded-s/e, border-s/e) that
+  follow the reading direction, and rtl: variants where a transform has to flip. Hebrew is set in IBM Plex Sans
+  Hebrew; Latin letters and digits in Instrument Sans (each font only covers its own script).
+*/
+@theme inline {
+  --font-sans: 'Instrument Sans Variable', 'IBM Plex Sans Hebrew', ui-sans-serif, system-ui, -apple-system,
+    'Segoe UI', sans-serif;
+
+  --color-canvas: var(--canvas);
+  --color-fg: var(--fg);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-faint: var(--fg-faint);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-field: var(--field);
+  --color-field-hover: var(--field-hover);
+  --color-raised: var(--raised);
+  --color-primary: var(--primary);
+  --color-primary-fg: var(--primary-fg);
+  --color-focus: var(--focus);
+  --color-danger: var(--danger);
+  --color-scrim: var(--scrim);
+}
+
+/* Light: the lake by day */
+:root {
+  color-scheme: light;
+  --canvas: #edf2f8;
+  --glow-a: rgba(84, 146, 226, 0.22);
+  --glow-b: rgba(140, 120, 236, 0.12);
+  --glow-c: rgba(96, 160, 214, 0.14);
+  --glass: rgba(255, 255, 255, 0.62);
+  --glass-strong: rgba(250, 252, 255, 0.94);
+  --glass-edge: rgba(255, 255, 255, 0.95);
+  --line: rgba(16, 42, 78, 0.09);
+  --line-strong: rgba(16, 42, 78, 0.17);
+  --field: rgba(16, 42, 78, 0.045);
+  --field-hover: rgba(16, 42, 78, 0.08);
+  --raised: #ffffff;
+  --fg: #0c1b30;
+  --fg-muted: #4f617a;
+  --fg-faint: #66788f;
+  --primary: #0f2340;
+  --primary-fg: #f3f7fc;
+  --primary-glow: rgba(15, 35, 64, 0.38);
+  --focus: #2a78da;
+  --danger: #c23347;
+  --scrim: rgba(12, 27, 48, 0.32);
+  --shadow-soft: rgba(16, 42, 78, 0.14);
+  --shadow-panel: 0 1px 2px rgba(16, 42, 78, 0.05), 0 28px 56px -32px rgba(16, 42, 78, 0.28);
+  --whatsapp: #128c4a;
+  --st-cold: #1f6fcb;
+  --st-no-answer: #a8620a;
+  --st-answered: #0b7a84;
+  --st-zoom: #6650d0;
+  --st-won: #0d8452;
+  --st-lost: #ba3a4c;
+  /* The dashboard's money chart: three categories, checked for colour-blind separation on each theme's surface */
+  --chart-retainers: #1f6fcb;
+  --chart-renewals: #0d8452;
+  --chart-pipeline: #6650d0;
+}
+
+/* Dark: the lake at night */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+    --canvas: #07111f;
+    --glow-a: rgba(52, 116, 206, 0.3);
+    --glow-b: rgba(116, 92, 226, 0.16);
+    --glow-c: rgba(26, 94, 150, 0.22);
+    --glass: rgba(148, 182, 230, 0.055);
+    --glass-strong: rgba(14, 27, 46, 0.92);
+    --glass-edge: rgba(200, 222, 255, 0.09);
+    --line: rgba(168, 198, 240, 0.11);
+    --line-strong: rgba(168, 198, 240, 0.2);
+    --field: rgba(168, 198, 240, 0.06);
+    --field-hover: rgba(168, 198, 240, 0.1);
+    --raised: rgba(196, 218, 255, 0.13);
+    --fg: #e8eef7;
+    --fg-muted: #94a5be;
+    --fg-faint: #6f819b;
+    --primary: #e8eef7;
+    --primary-fg: #08121f;
+    --primary-glow: rgba(150, 190, 255, 0.28);
+    --focus: #79b4ff;
+    --danger: #f2828f;
+    --scrim: rgba(2, 6, 14, 0.62);
+    --shadow-soft: rgba(0, 0, 0, 0.45);
+    --shadow-panel: 0 1px 2px rgba(0, 0, 0, 0.3), 0 32px 64px -36px rgba(0, 0, 0, 0.75);
+    --whatsapp: #3dd68c;
+    --st-cold: #7cc2ff;
+    --st-no-answer: #f2b661;
+    --st-answered: #5fd3dc;
+    --st-zoom: #b4a6ff;
+    --st-won: #4ade9e;
+    --st-lost: #f38c99;
+    --chart-retainers: #3690e3;
+    --chart-renewals: #00ad71;
+    --chart-pipeline: #8470e5;
+  }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --canvas: #07111f;
+  --glow-a: rgba(52, 116, 206, 0.3);
+  --glow-b: rgba(116, 92, 226, 0.16);
+  --glow-c: rgba(26, 94, 150, 0.22);
+  --glass: rgba(148, 182, 230, 0.055);
+  --glass-strong: rgba(14, 27, 46, 0.92);
+  --glass-edge: rgba(200, 222, 255, 0.09);
+  --line: rgba(168, 198, 240, 0.11);
+  --line-strong: rgba(168, 198, 240, 0.2);
+  --field: rgba(168, 198, 240, 0.06);
+  --field-hover: rgba(168, 198, 240, 0.1);
+  --raised: rgba(196, 218, 255, 0.13);
+  --fg: #e8eef7;
+  --fg-muted: #94a5be;
+  --fg-faint: #6f819b;
+  --primary: #e8eef7;
+  --primary-fg: #08121f;
+  --primary-glow: rgba(150, 190, 255, 0.28);
+  --focus: #79b4ff;
+  --danger: #f2828f;
+  --scrim: rgba(2, 6, 14, 0.62);
+  --shadow-soft: rgba(0, 0, 0, 0.45);
+  --shadow-panel: 0 1px 2px rgba(0, 0, 0, 0.3), 0 32px 64px -36px rgba(0, 0, 0, 0.75);
+  --whatsapp: #3dd68c;
+  --st-cold: #7cc2ff;
+  --st-no-answer: #f2b661;
+  --st-answered: #5fd3dc;
+  --st-zoom: #b4a6ff;
+  --st-won: #4ade9e;
+  --st-lost: #f38c99;
+  --chart-retainers: #3690e3;
+  --chart-renewals: #00ad71;
+  --chart-pipeline: #8470e5;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    min-height: 100dvh;
+    background: var(--canvas);
+    color: var(--fg);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Paints the phone's top safe area so nothing scrolls visibly behind the status bar. */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0 0 auto;
+    height: env(safe-area-inset-top, 0px);
+    z-index: 30;
+    background: var(--canvas);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: color-mix(in oklab, var(--focus) 32%, transparent);
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--line-strong) transparent;
+  }
+
+  button:not(:disabled),
+  select {
+    cursor: pointer;
+  }
+
+  input[type='search']::-webkit-search-cancel-button {
+    appearance: none;
+  }
+}
+
+@layer components {
+  .page {
+    position: relative;
+    z-index: 1;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+  }
+  @media (min-width: 640px) {
+    .page {
+      padding-left: max(24px, env(safe-area-inset-left, 0px));
+      padding-right: max(24px, env(safe-area-inset-right, 0px));
+    }
+  }
+  @media (min-width: 1024px) {
+    .page {
+      padding-left: max(32px, env(safe-area-inset-left, 0px));
+      padding-right: max(32px, env(safe-area-inset-right, 0px));
+    }
+  }
+
+  /* Soft light on the water behind the glass panels */
+  .backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background:
+      radial-gradient(64rem 34rem at 12% -8%, var(--glow-a), transparent 64%),
+      radial-gradient(48rem 30rem at 96% 2%, var(--glow-b), transparent 62%),
+      radial-gradient(60rem 40rem at 50% 118%, var(--glow-c), transparent 60%);
+  }
+
+  .glass {
+    background: var(--glass);
+    border: 1px solid var(--line);
+    box-shadow: inset 0 1px 0 var(--glass-edge), var(--shadow-panel);
+    -webkit-backdrop-filter: blur(22px) saturate(150%);
+    backdrop-filter: blur(22px) saturate(150%);
+  }
+
+  .glass-strong {
+    background: var(--glass-strong);
+    border: 1px solid var(--line-strong);
+    box-shadow: inset 0 1px 0 var(--glass-edge), var(--shadow-panel);
+    -webkit-backdrop-filter: blur(28px) saturate(160%);
+    backdrop-filter: blur(28px) saturate(160%);
+  }
+
+  /* --tone is set inline from the status or channel (see toneStyle in lib/status.ts) */
+  .tone-chip {
+    color: var(--tone);
+    background: color-mix(in oklab, var(--tone) 14%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--tone) 30%, transparent);
+  }
+  .tone-text {
+    color: var(--tone);
+  }
+
+  /* The approach note on a daily card: a quiet panel tinted with the Cold Call blue, its edge where lines start */
+  .approach {
+    background: color-mix(in oklab, var(--st-cold) 8%, transparent);
+    box-shadow: inset 2px 0 0 color-mix(in oklab, var(--st-cold) 55%, transparent);
+  }
+  [dir='rtl'] .approach,
+  .approach:has(> p[dir='rtl']) {
+    box-shadow: inset -2px 0 0 color-mix(in oklab, var(--st-cold) 55%, transparent);
+  }
+  .approach:has(> p[dir='ltr']) {
+    box-shadow: inset 2px 0 0 color-mix(in oklab, var(--st-cold) 55%, transparent);
+  }
+
+  /* Phone numbers, emails, web addresses and key names inside Hebrew text: kept left to right as one piece */
+  .ltr {
+    direction: ltr;
+    unicode-bidi: isolate;
+  }
+  /* Arrows that point "forward" or "back" turn around in Hebrew */
+  [dir='rtl'] .flip-rtl {
+    transform: scaleX(-1);
+  }
+
+  /* Quick actions on a daily card: tinted by their outcome, filled on hover */
+  .action-button {
+    color: var(--tone);
+    background: color-mix(in oklab, var(--tone) 9%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--tone) 28%, transparent);
+  }
+  .action-button:hover {
+    background: color-mix(in oklab, var(--tone) 17%, transparent);
+  }
+  .action-button-strong {
+    background: color-mix(in oklab, var(--tone) 18%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--tone) 45%, transparent);
+  }
+
+  /* Lead rows: a card on phones, one table row from 1024px */
+  .lead-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      'name value'
+      'status updated'
+      'meta meta';
+    column-gap: 1rem;
+    row-gap: 0.55rem;
+    align-items: center;
+  }
+  @media (min-width: 1024px) {
+    .lead-grid {
+      grid-template-columns: minmax(0, 2.2fr) minmax(0, 1.2fr) 9rem 6rem 7rem 5.25rem 1rem;
+      grid-template-areas: 'name meta status calls value updated chevron';
+      column-gap: 1.25rem;
+    }
+  }
+  .ga-name {
+    grid-area: name;
+  }
+  .ga-calls {
+    grid-area: calls;
+  }
+  .ga-status {
+    grid-area: status;
+  }
+  .ga-value {
+    grid-area: value;
+  }
+  .ga-meta {
+    grid-area: meta;
+  }
+  .ga-updated {
+    grid-area: updated;
+  }
+  .ga-chevron {
+    grid-area: chevron;
+  }
+
+  /* A business in the Prospector: a compact card on phones, a table row on wide screens. On phones the
+     phone number keeps its width and the website shares the score's column, so neither squeezes the name. */
+  .prospect-grid {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      'name name score'
+      'verdict verdict verdict'
+      'phone site site';
+    column-gap: 0.75rem;
+    row-gap: 0.45rem;
+    align-items: center;
+  }
+  @media (min-width: 1024px) {
+    .prospect-grid {
+      grid-template-columns: 8.75rem minmax(0, 1.45fr) 7.5rem minmax(0, 1fr) minmax(0, 1.7fr) 1rem;
+      grid-template-areas: 'score name phone site verdict chevron';
+      column-gap: 1.25rem;
+    }
+  }
+  .gp-score {
+    grid-area: score;
+  }
+  .gp-name {
+    grid-area: name;
+  }
+  .gp-phone {
+    grid-area: phone;
+  }
+  .gp-site {
+    grid-area: site;
+  }
+  .gp-verdict {
+    grid-area: verdict;
+  }
+  .gp-chevron {
+    grid-area: chevron;
+  }
+
+  .toolbar {
+    top: env(safe-area-inset-top, 0px);
+    transition:
+      background-color 0.2s,
+      box-shadow 0.2s;
+  }
+  .toolbar-stuck {
+    background: color-mix(in oklab, var(--canvas) 90%, transparent);
+    box-shadow: 0 1px 0 var(--line);
+    -webkit-backdrop-filter: blur(18px) saturate(150%);
+    backdrop-filter: blur(18px) saturate(150%);
+  }
+
+  /* Bottom corner on the end side: left in Hebrew, within thumb reach */
+  /* Phones: the views' bar along the bottom edge, clear of the home indicator, frosted over the page */
+  .tabbar {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
+    background: color-mix(in oklab, var(--canvas) 94%, transparent);
+    -webkit-backdrop-filter: blur(18px) saturate(150%);
+    backdrop-filter: blur(18px) saturate(150%);
+    box-shadow: 0 -1px 0 var(--line);
+  }
+  /* While typing, the keyboard needs the room */
+  body:has(:is(input:not([type='checkbox'], [type='radio'], [type='button'], [type='file']), textarea, [contenteditable='true']):focus) .tabbar {
+    display: none;
+  }
+
+  .fab {
+    inset-inline-end: calc(16px + env(safe-area-inset-left, 0px));
+    /* Above the views' bar */
+    bottom: calc(74px + env(safe-area-inset-bottom, 0px));
+    box-shadow:
+      0 14px 30px -10px var(--primary-glow),
+      0 2px 6px var(--shadow-soft);
+  }
+
+  .toaster {
+    /* Phones: above the views' bar and the new-lead button */
+    bottom: calc(142px + env(safe-area-inset-bottom, 0px));
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+  }
+  @media (min-width: 640px) {
+    .toaster {
+      bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+    }
+  }
+  /* Above the Prospector's import bar while it shows */
+  body.has-dock .toaster {
+    bottom: calc(152px + env(safe-area-inset-bottom, 0px));
+  }
+  .dock {
+    bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+  }
+  @media (min-width: 640px) {
+    body.has-dock .toaster {
+      bottom: calc(96px + env(safe-area-inset-bottom, 0px));
+    }
+    .dock {
+      bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    }
+  }
+
+  /* Recording scrubber: a thin track filled up to --progress in the player's --tone */
+  .seek {
+    appearance: none;
+    height: 18px;
+    background: transparent;
+    cursor: pointer;
+  }
+  .seek::-webkit-slider-runnable-track {
+    height: 4px;
+    border-radius: 999px;
+    background: linear-gradient(to right, var(--tone) var(--progress, 0%), var(--line-strong) var(--progress, 0%));
+  }
+  .seek::-moz-range-track {
+    height: 4px;
+    border-radius: 999px;
+    background: linear-gradient(to right, var(--tone) var(--progress, 0%), var(--line-strong) var(--progress, 0%));
+  }
+  .seek::-webkit-slider-thumb {
+    appearance: none;
+    margin-top: -4px;
+    width: 12px;
+    height: 12px;
+    border-radius: 999px;
+    background: var(--tone);
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--tone) 22%, transparent);
+    transition: transform 0.15s;
+  }
+  .seek::-moz-range-thumb {
+    width: 12px;
+    height: 12px;
+    border: 0;
+    border-radius: 999px;
+    background: var(--tone);
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--tone) 22%, transparent);
+  }
+  .seek:hover::-webkit-slider-thumb {
+    transform: scale(1.2);
+  }
+  .seek:disabled {
+    cursor: default;
+    opacity: 0.5;
+  }
+
+  /* The vertical line behind a timeline's icons */
+  .timeline-rail {
+    position: relative;
+  }
+  .timeline-rail::before {
+    content: '';
+    position: absolute;
+    top: 18px;
+    bottom: 18px;
+    inset-inline-start: 17px;
+    width: 1px;
+    background: var(--line-strong);
+  }
+
+  /* An AI answer being prepared: a slow sheen across the placeholder lines */
+  .shimmer {
+    background: linear-gradient(90deg, var(--field) 0%, var(--field-hover) 40%, var(--field) 80%);
+    background-size: 220% 100%;
+    animation: shimmer 1.6s ease-in-out infinite;
+  }
+
+  /* A progress bar with no end yet: a segment sliding the way the text runs */
+  .progress-indeterminate {
+    position: relative;
+    overflow: hidden;
+  }
+  .progress-indeterminate::after {
+    content: '';
+    position: absolute;
+    inset-block: 0;
+    width: 35%;
+    border-radius: 9999px;
+    background: var(--st-cold);
+    animation: progress-slide 1.3s ease-in-out infinite;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .progress-indeterminate::after {
+      animation-duration: 3.5s;
+    }
+  }
+
+  /* What to say on the next call: quoted lines with an accent edge. Logical sides follow each line's
+     own direction (dir="auto"), so a Hebrew line gets its edge on the right. */
+  .script-line {
+    border-inline-start: 2px solid color-mix(in oklab, var(--tone) 60%, transparent);
+    border-start-end-radius: 0.5rem;
+    border-end-end-radius: 0.5rem;
+  }
+
+  .no-scrollbar {
+    scrollbar-width: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .row-flash {
+    animation: row-flash 2.4s ease-out;
+  }
+  .bar-reveal {
+    animation: bar-reveal 1.1s cubic-bezier(0.22, 1, 0.36, 1) 0.15s both;
+  }
+  /* Bars grow from where reading starts: the right in Hebrew */
+  [dir='rtl'] .bar-reveal {
+    animation-name: bar-reveal-rtl;
+  }
+  .bar-segment {
+    transition: flex-grow 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  /* A chart bar grows in from where reading starts, keeping its own square start and rounded end */
+  .chart-reveal {
+    animation: chart-reveal 0.9s cubic-bezier(0.22, 1, 0.36, 1) 0.15s both;
+  }
+  [dir='rtl'] .chart-reveal {
+    animation-name: chart-reveal-rtl;
+  }
+  .win-pulse {
+    position: absolute;
+    inset: -0.4em -0.6em;
+    border-radius: 999px;
+    pointer-events: none;
+    background: radial-gradient(closest-side, color-mix(in oklab, var(--st-won) 40%, transparent), transparent);
+    animation: win-pulse 1.8s ease-out forwards;
+  }
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 120% 0;
+  }
+  to {
+    background-position: -120% 0;
+  }
+}
+
+@keyframes row-flash {
+  0%,
+  25% {
+    background-color: color-mix(in oklab, var(--focus) 16%, transparent);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+@keyframes bar-reveal {
+  from {
+    clip-path: inset(0 100% 0 0 round 999px);
+  }
+  to {
+    clip-path: inset(0 0 0 0 round 999px);
+  }
+}
+
+@keyframes bar-reveal-rtl {
+  from {
+    clip-path: inset(0 0 0 100% round 999px);
+  }
+  to {
+    clip-path: inset(0 0 0 0 round 999px);
+  }
+}
+
+@keyframes chart-reveal {
+  from {
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+@keyframes chart-reveal-rtl {
+  from {
+    clip-path: inset(0 0 0 100%);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+@keyframes win-pulse {
+  0% {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+  20% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.12);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@keyframes progress-slide {
+  from {
+    inset-inline-start: -35%;
+  }
+  to {
+    inset-inline-start: 100%;
+  }
+}
