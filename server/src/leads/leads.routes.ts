@@ -4,16 +4,12 @@ import { HttpError } from '../lib/http-error.js';
 import type { MediaStorage } from '../media/storage.js';
 import type { TranscriptionQueue } from '../transcription/queue.js';
 import { ConflictError, type LeadRecord, type LeadUpdate, type Stores } from '../stores/types.js';
-import { planJsonImport, type JsonSkip } from './json-import.js';
-import { ActionInput, ActionParams, BulkCreateBody, BulkDeleteBody, JsonImportBody, LeadInput, LeadParams, LeadPatch } from './leads.schemas.js';
+import { planJsonImport, withDetailsInNote, type JsonLeadDraft, type JsonSkip } from './json-import.js';
+import { ActionInput, ActionParams, BulkCreateBody, BulkDeleteBody, JsonImportBody, JsonMappingQuery, LeadInput, LeadParams, LeadPatch } from './leads.schemas.js';
 import { applyAction, stepTime, timelineEntryFor, undoAction, type WorkflowState } from './workflow.js';
 
 const leadNotFound = () => new HttpError(404, 'הליד הזה כבר לא קיים.');
 
-export interface LeadHooks {
-  /** Leads were added, deleted, or had their number changed (the WhatsApp sync matches chats by number) */
-  leadsChanged?(created?: string[]): void;
-}
 
 /**
  * Mounted at /api/leads. Matches src/data/repository/http.ts in the frontend. `countryCode` reads local numbers
@@ -24,7 +20,6 @@ export function createLeadsRouter(
   storage: MediaStorage,
   clock: () => Date,
   transcription: TranscriptionQueue | null = null,
-  hooks: LeadHooks = {},
   countryCode = '972',
 ) {
   const router = Router();
@@ -54,7 +49,6 @@ export function createLeadsRouter(
       stores.training.removeLeadSources(ids),
     ]);
     await store.removeMany(ids);
-    hooks.leadsChanged?.();
     if (files.length) {
       await storage.remove(files.map((file) => file.storageKey)).catch((error: unknown) => {
         console.error("Some recording files couldn't be deleted:", error);
@@ -68,7 +62,6 @@ export function createLeadsRouter(
 
   router.post('/', async (req, res) => {
     const lead = await store.create(LeadInput.parse(req.body));
-    hooks.leadsChanged?.([lead.id]);
     res.status(201).json(lead);
   });
 
@@ -76,39 +69,49 @@ export function createLeadsRouter(
   router.post('/bulk', async (req, res) => {
     const { leads } = BulkCreateBody.parse(req.body);
     const result = await store.createMany(leads);
-    if (result.created.length) hooks.leadsChanged?.(result.created.map((lead) => lead.id));
     res.status(201).json(result);
   });
 
   /**
-   * Leads pasted as a JSON array: [{ name, phone, source, niche, notes }]. Before the insert, the numbers already
-   * on a lead are looked up in the database, and they (in any format) and numbers repeated in the paste are
-   * filtered out, so only leads with new numbers are saved. Answers what was created and what was skipped and why.
+   * Leads pasted as a JSON array: [{ name, phone, source, niche, notes }], each field found by any of its usual
+   * names, or from the key chosen for it in the address (?name=title&phone=mobile&niche=category). Before the
+   * insert, the numbers already on a lead are looked up in the database, and they (in any format) and numbers
+   * repeated in the paste are filtered out, so only leads with new numbers are saved, every one as a new lead
+   * ("חדש"). Answers what was created and what was skipped and why.
    */
   router.post('/import-json', async (req, res) => {
     const items = JsonImportBody.parse(req.body);
-    const plan = planJsonImport(items, await store.phones(), countryCode);
+    const mapping = JsonMappingQuery.parse(req.query);
+    const plan = planJsonImport(items, await store.phones(), countryCode, mapping);
     const skipped: JsonSkip[] = [...plan.skipped];
     const now = clock().getTime();
     const inputs: LeadInput[] = [];
     plan.leads.forEach((draft, order) => {
       // A moment apart, so the paste keeps its order in lists sorted by when leads were added
       const createdAt = new Date(now - order).toISOString();
-      const parsed = LeadInput.safeParse({
-        id: randomUUID(),
-        name: draft.name,
-        phone: draft.phone,
-        campaign: draft.campaign,
-        method: 'call',
-        notes: draft.note ? [{ id: randomUUID(), body: draft.note, createdAt }] : [],
-        createdAt,
-      });
+      const id = randomUUID();
+      const input = (lead: JsonLeadDraft) =>
+        LeadInput.safeParse({
+          id,
+          name: lead.name,
+          contactName: lead.contactName,
+          phone: lead.phone,
+          email: lead.email,
+          website: lead.website,
+          campaign: lead.campaign,
+          method: 'call',
+          // Every imported lead starts its timeline with this note (it opens with "יובא מקובץ JSON")
+          notes: [{ id: randomUUID(), body: lead.note, createdAt }],
+          createdAt,
+        });
+      let parsed = input(draft);
+      // A contact, email or website the lead can't take doesn't cost the lead: it's kept in the note instead
+      if (!parsed.success && (draft.contactName || draft.email || draft.website)) parsed = input(withDetailsInNote(draft));
       if (parsed.success) inputs.push(parsed.data);
       else skipped.push({ index: draft.index, name: draft.name, phone: draft.phone, reason: 'invalid', message: parsed.error.issues[0].message });
     });
     // One insertMany for all of them (createMany), with their notes on the timeline
     const created = inputs.length ? (await store.createMany(inputs)).created : [];
-    if (created.length) hooks.leadsChanged?.(created.map((lead) => lead.id));
     res.status(201).json({ created, skipped: skipped.sort((a, b) => a.index - b.index), ignoredFields: plan.ignoredFields });
   });
 
@@ -131,7 +134,6 @@ export function createLeadsRouter(
     }
     const lead = await store.update(id, patch);
     if (!lead) throw leadNotFound();
-    if (patch.phone !== undefined || patch.contactName !== undefined) hooks.leadsChanged?.(patch.phone !== undefined ? [id] : []);
     res.json(lead);
   });
 
@@ -149,7 +151,10 @@ export function createLeadsRouter(
     res.json(lead);
   });
 
-  /** Undoing a step keeps what was written about it: the entry becomes a plain note. Empty entries go away. */
+  /**
+   * Undoing a step keeps what was written about it: the entry becomes a plain note (a WhatsApp step's, a plain
+   * WhatsApp message). Empty entries go away.
+   */
   router.post('/:id/actions/:actionId/undo', async (req, res) => {
     const { id, actionId } = ActionParams.parse(req.params);
     const lead = await changeWorkflow(id, (current) => undoAction(current, actionId, clock()));
@@ -157,7 +162,7 @@ export function createLeadsRouter(
     if (entry?.step) {
       const hasRecordings = (await stores.media.list(id)).some((file) => file.interactionId === actionId);
       if (entry.body || hasRecordings) {
-        await stores.interactions.update(id, actionId, { kind: 'note', outcome: null, step: null, stageTo: null });
+        await stores.interactions.update(id, actionId, { kind: entry.kind === 'whatsapp' ? 'whatsapp' : 'note', outcome: null, step: null, stageTo: null });
       } else {
         await stores.interactions.remove(id, actionId);
       }

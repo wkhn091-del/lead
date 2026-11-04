@@ -3,6 +3,7 @@ import { setReachabilityHandler } from '../data/repository/http';
 import { copyText } from '../lib/clipboard';
 import { createId } from '../lib/id';
 import { retryDelay, verdictFor, writtenText, type DroppedItem, type OutboxItem, type OutboxKind, type OutboxOp } from '../lib/outbox';
+import { forgetQuickCopy } from '../lib/quick-copy';
 import { localStore, safeStorage } from '../lib/storage';
 import { toast } from './toasts';
 
@@ -130,7 +131,12 @@ let timer: ReturnType<typeof setTimeout> | undefined;
 
 export const useSync = create<SyncState>()((set, get) => {
   const store = (item: OutboxItem) => {
-    safeStorage.set(keyFor(item), JSON.stringify(item));
+    const text = JSON.stringify(item);
+    // The outbox must fit: when the storage is full, the quick copy of the leads gives its place up
+    if (!safeStorage.set(keyFor(item), text)) {
+      forgetQuickCopy();
+      safeStorage.set(keyFor(item), text);
+    }
   };
   const forget = (item: OutboxItem) => {
     safeStorage.remove(keyFor(item));

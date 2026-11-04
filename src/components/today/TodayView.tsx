@@ -120,6 +120,9 @@ function TodayHero({ items, quota, date, poolSize, calls }: HeroProps) {
             <span><b className="font-semibold text-fg tabular-nums">{tally('answered')}</b> ענו</span>
             <span><b className="font-semibold text-fg tabular-nums">{tally('no_answer')}</b> ללא מענה</span>
             <span><b className="font-semibold text-fg tabular-nums">{tally('archived')}</b> לא רלוונטיים</span>
+            {tally('whatsapp') > 0 && (
+              <span><b className="font-semibold text-fg tabular-nums">{tally('whatsapp')}</b> בוואטסאפ</span>
+            )}
           </p>
         </div>
 

@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { appConfig } from '../config';
 import { repository } from '../data/repository';
-import type { JsonSkip } from '../data/repository/types';
+import type { JsonMapping, JsonSkip } from '../data/repository/types';
 import { createSampleLeads, isSampleLead } from '../data/sampleLeads';
 import { NO_DEAL } from '../lib/deal';
 import { createId } from '../lib/id';
@@ -73,7 +73,8 @@ interface LeadsState {
    * Sends leads pasted as JSON in parts; the server keeps only numbers no lead has yet. Each part's new leads show
    * as soon as it's stored. `from`: an import that stopped, to carry on where it did.
    */
-  importJson: (items: unknown[], options?: { from?: JsonImportOutcome; onProgress?: (done: number) => void }) => Promise<JsonImportOutcome>;
+  /** Sends a JSON paste in parts, with the keys chosen by hand for the name, phone and niche (`mapping`) */
+  importJson: (items: unknown[], options?: { from?: JsonImportOutcome; mapping?: JsonMapping; onProgress?: (done: number) => void }) => Promise<JsonImportOutcome>;
   updateLead: (id: string, patch: LeadPatch) => void;
   /** Hides the lead now and deletes it once the undo window has passed */
   removeLead: (id: string) => void;
@@ -337,7 +338,7 @@ export const useLeadStore = create<LeadsState>()((set, get) => {
       }
     },
 
-    async importJson(items, { from, onProgress } = {}) {
+    async importJson(items, { from, mapping, onProgress } = {}) {
       const outcome: JsonImportOutcome = {
         created: [...(from?.created ?? [])],
         skipped: [...(from?.skipped ?? [])],
@@ -348,7 +349,7 @@ export const useLeadStore = create<LeadsState>()((set, get) => {
       set((state) => ({ pending: state.pending + 1 }));
       try {
         for (const batch of jsonBatches(items.slice(outcome.done))) {
-          const result = await repository.importJson(batch);
+          const result = await repository.importJson(batch, mapping);
           const offset = outcome.done;
           const earlier = new Set(outcome.created.map((lead) => lead.id));
           for (const { leadId, firstIndex, ...skip } of result.skipped) {
@@ -423,7 +424,8 @@ export const useLeadStore = create<LeadsState>()((set, get) => {
       const canceled = useSync.getState().cancel((op) => op.kind === 'act' && op.action.id === actionId);
       if (canceled?.kind === 'act') {
         const body = canceled.details.body?.trim();
-        if (body) void send({ kind: 'add-entry', leadId, entry: { id: actionId, kind: 'note', body, at: canceled.at, stage: canceled.action.from } });
+        const kind = canceled.action.type === 'whatsapp' ? 'whatsapp' : 'note';
+        if (body) void send({ kind: 'add-entry', leadId, entry: { id: actionId, kind, body, at: canceled.at, stage: canceled.action.from } });
         return;
       }
       void send({ kind: 'undo', leadId, actionId }, () => {

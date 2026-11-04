@@ -1,9 +1,11 @@
-import { jsonField } from '../../../server/src/leads/json-import';
+import { jsonFieldsOf, leadList, type JsonField, type JsonMapping } from '../../../server/src/leads/json-import';
+
+export { jsonKeysOf, MAPPABLE_FIELDS, type JsonKey, type JsonMapping, type MappableField } from '../../../server/src/leads/json-import';
 
 /**
- * Leads pasted as JSON, read in the browser before they're sent: whether it's JSON at all and where it breaks, how
- * many leads it holds, and which fields won't be read. The server checks each lead and the phone numbers
- * (server/src/leads/json-import.ts).
+ * Leads pasted as JSON or opened from a JSON file, read in the browser before they're sent: whether it's JSON at
+ * all and where it breaks, how many leads it holds, which field was found where, and what won't be read. The
+ * server reads each lead by the same rules and checks the phone numbers (server/src/leads/json-import.ts).
  */
 
 export const JSON_EXAMPLE = `[
@@ -31,6 +33,17 @@ export type JsonPaste =
 /** Quotes a phone or a notes app turns into “ ”, and a comma left before ] or }: the usual reasons pasted JSON won't read */
 const lenient = (text: string) => text.replace(/[“”„‟]/g, '"').replace(/,(\s*[\]}])/g, '$1');
 
+/** JSON Lines, one lead per line as some scrapers export: null unless every line is an object */
+function jsonLines(text: string): unknown[] | null {
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (lines.length < 2 || !lines.every((line) => line.startsWith('{'))) return null;
+  try {
+    return lines.map((line) => JSON.parse(line.replace(/,$/, '')) as unknown);
+  } catch {
+    return null;
+  }
+}
+
 export function parseJsonLeads(text: string): JsonPaste {
   if (!text.trim()) return { kind: 'empty' };
   let value: unknown;
@@ -40,15 +53,20 @@ export function parseJsonLeads(text: string): JsonPaste {
     value = JSON.parse(text);
   } catch (error) {
     const corrected = lenient(text);
+    const lines = jsonLines(text);
     try {
-      if (corrected === text) throw error;
-      value = JSON.parse(corrected);
-      fixed = true;
+      if (lines) value = lines;
+      else if (corrected === text) throw error;
+      else {
+        value = JSON.parse(corrected);
+        fixed = true;
+      }
     } catch {
       return { kind: 'error', message: jsonProblem(text, error) };
     }
   }
-  const items = Array.isArray(value) ? value : typeof value === 'object' && value !== null ? [value] : null;
+  // An array, the list an export wraps its leads in ({ "data": [ … ] }), or one lead on its own
+  const items = leadList(value) ?? (typeof value === 'object' && value !== null ? [value] : null);
   if (!items) return { kind: 'error', message: 'צריך מערך של לידים, כמו [ { "name": "…", "phone": "…" } ].' };
   if (items.length === 0) return { kind: 'error', message: 'המערך ריק: אין בו לידים.' };
   return { kind: 'ok', items, fixed };
@@ -74,14 +92,38 @@ function jsonProblem(text: string, error: unknown): string {
   return 'זה לא JSON תקין. כדאי לבדוק פסיקים, מירכאות וסוגריים.';
 }
 
-/** Fields the items have that won't be read (only name, phone, source, niche and notes are) */
-export function unreadFields(items: readonly unknown[]): string[] {
-  const found = new Set<string>();
-  for (const item of items) {
-    if (typeof item !== 'object' || item === null || Array.isArray(item)) continue;
-    for (const key of Object.keys(item)) if (key.trim() && !jsonField(key)) found.add(key.trim());
-  }
-  return [...found];
+/** Fields the items have that won't be read: no field goes by their name, or there's nothing usable in them */
+export const unreadFields = (items: readonly unknown[], mapping: JsonMapping = {}): string[] => jsonFieldsOf(items, mapping).unread;
+
+/** What the app calls each field, in the order it shows them; the parts of an address and a rating go together */
+const FIELD_LABELS: readonly { label: string; fields: readonly JsonField[] }[] = [
+  { label: 'שם העסק', fields: ['name'] },
+  { label: 'טלפון', fields: ['phone'] },
+  { label: 'נישה', fields: ['niche'] },
+  { label: 'איש קשר', fields: ['contactName'] },
+  { label: 'אימייל', fields: ['email'] },
+  { label: 'אתר', fields: ['website'] },
+  { label: 'כתובת', fields: ['address', 'street', 'city'] },
+  { label: 'מקור', fields: ['source'] },
+  { label: 'דירוג', fields: ['rating', 'reviews'] },
+  { label: 'קישור', fields: ['link'] },
+  { label: 'תיאור', fields: ['description'] },
+  { label: 'הערות', fields: ['notes'] },
+];
+
+export interface FoundField {
+  label: string;
+  /** The keys it was found under, as the items have them */
+  keys: string[];
+}
+
+/** Which field was found under which keys ("שם העסק: title"), for the paste's preview, with the keys chosen by hand */
+export function foundFields(items: readonly unknown[], mapping: JsonMapping = {}): FoundField[] {
+  const { fields } = jsonFieldsOf(items, mapping);
+  return FIELD_LABELS.flatMap(({ label, fields: group }) => {
+    const keys = [...new Set(group.flatMap((field) => fields[field] ?? []))];
+    return keys.length ? [{ label, keys }] : [];
+  });
 }
 
 const encoder = new TextEncoder();

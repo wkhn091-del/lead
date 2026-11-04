@@ -1,14 +1,17 @@
 import type { CSSProperties } from 'react';
 import {
   Archive,
+  FileText,
   Handshake,
   Mail,
   MessageCircle,
   NotebookPen,
   Phone,
+  PhoneCall,
   PhoneIncoming,
   PhoneMissed,
   PhoneOutgoing,
+  Sparkle,
   Video,
   VideoOff,
   type LucideIcon,
@@ -22,10 +25,14 @@ export interface ToneMeta {
   tone: string;
 }
 
+/**
+ * The three stages the server keeps (server/src/leads/workflow.ts): outreach (calls and WhatsApp until the prospect
+ * wants a price), the quote, and the closed deal. `next` names the step to the next stage.
+ */
 export const STAGE_META: Record<Stage, ToneMeta & { step: number; next: string | null }> = {
-  cold_call: { label: 'שיחה קרה', step: 1, next: 'נקבע זום', icon: PhoneOutgoing, tone: 'var(--st-cold)' },
-  zoom: { label: 'פגישת זום', step: 2, next: 'סגירת עסקה', icon: Video, tone: 'var(--st-zoom)' },
-  closed: { label: 'עסקה סגורה', step: 3, next: null, icon: Handshake, tone: 'var(--st-won)' },
+  cold_call: { label: 'פנייה', step: 1, next: 'הצעת מחיר', icon: PhoneOutgoing, tone: 'var(--st-cold)' },
+  zoom: { label: 'הצעת מחיר', step: 2, next: 'נסגר / לקוח', icon: FileText, tone: 'var(--st-zoom)' },
+  closed: { label: 'נסגר / לקוח', step: 3, next: null, icon: Handshake, tone: 'var(--st-won)' },
 };
 
 export const ARCHIVED_META: ToneMeta = { label: 'לא רלוונטי', icon: Archive, tone: 'var(--st-lost)' };
@@ -36,7 +43,33 @@ export const OUTCOME_META: Record<ActivityType, ToneMeta> = {
   answered: { label: 'ענה', icon: PhoneIncoming, tone: 'var(--st-answered)' },
   no_answer: { label: 'אין מענה', icon: PhoneMissed, tone: 'var(--st-no-answer)' },
   archived: ARCHIVED_META,
+  whatsapp: { label: 'נשלח וואטסאפ', icon: MessageCircle, tone: 'var(--whatsapp)' },
 };
+
+/**
+ * The board's columns, in order. Derived from the stage and the latest contact, so nothing new is stored: a lead
+ * at the outreach stage is new until a call or a WhatsApp message is logged, and then sits where the latest one
+ * puts it.
+ */
+export const PIPELINE = ['new', 'contacted', 'whatsapp', 'quote', 'client'] as const;
+export type PipelineStatus = (typeof PIPELINE)[number];
+
+export const STATUS_META: Record<PipelineStatus, ToneMeta & { short: string }> = {
+  new: { label: 'חדש', short: 'חדש', icon: Sparkle, tone: 'var(--st-cold)' },
+  contacted: { label: 'נוצר קשר (שיחה)', short: 'נוצר קשר', icon: PhoneCall, tone: 'var(--st-answered)' },
+  whatsapp: { label: 'נשלח וואטסאפ', short: 'וואטסאפ', icon: MessageCircle, tone: 'var(--whatsapp)' },
+  quote: { label: 'הצעת מחיר', short: 'הצעת מחיר', icon: STAGE_META.zoom.icon, tone: STAGE_META.zoom.tone },
+  client: { label: 'נסגר / לקוח', short: 'לקוח', icon: STAGE_META.closed.icon, tone: STAGE_META.closed.tone },
+};
+
+/** The lead's column on the board. Leads marked not relevant keep theirs, and are shown apart. */
+export function pipelineStatus(lead: Pick<Lead, 'stage' | 'activity'>): PipelineStatus {
+  if (lead.stage === 'closed') return 'client';
+  if (lead.stage === 'zoom') return 'quote';
+  const latest = lead.activity.find((step) => step.type === 'whatsapp' || step.type === 'answered' || step.type === 'no_answer');
+  if (!latest) return 'new';
+  return latest.type === 'whatsapp' ? 'whatsapp' : 'contacted';
+}
 
 /** The icon and color of a timeline entry: what happened, and where it led */
 export function entryMeta(entry: Pick<Interaction, 'kind' | 'outcome' | 'step' | 'stageTo'>): Omit<ToneMeta, 'label'> {
@@ -58,9 +91,9 @@ export function entryMeta(entry: Pick<Interaction, 'kind' | 'outcome' | 'step' |
   }
 }
 
-/** The badge a lead shows: its stage, or "לא רלוונטי" once archived */
-export const leadBadge = (lead: Pick<Lead, 'stage' | 'archivedAt'>): ToneMeta =>
-  lead.archivedAt ? ARCHIVED_META : STAGE_META[lead.stage];
+/** The badge a lead shows: its status on the board, or "לא רלוונטי" once archived */
+export const leadBadge = (lead: Pick<Lead, 'stage' | 'archivedAt' | 'activity'>): ToneMeta =>
+  lead.archivedAt ? ARCHIVED_META : STATUS_META[pipelineStatus(lead)];
 
 export const CHANNEL_META: Record<ContactMethod, ToneMeta> = {
   call: { label: 'שיחה', icon: Phone, tone: 'var(--fg-muted)' },

@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'motion/react';
-import { AudioLines, History, LoaderCircle, Paperclip, Pencil, RotateCcw, Trash2, TriangleAlert, Undo2, X } from 'lucide-react';
+import { AudioLines, LoaderCircle, Paperclip, Pencil, RotateCcw, Trash2, TriangleAlert, Undo2, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { appConfig } from '../../config';
@@ -15,7 +15,6 @@ import { canUndo } from '../../lib/workflow';
 import { useLeadStore } from '../../store/leads';
 import { useTimeline, type LeadProfile, type Upload } from '../../store/timeline';
 import { useUi } from '../../store/ui';
-import { useWhatsApp } from '../../store/whatsapp';
 import type { Interaction, Lead, MediaFile } from '../../types';
 import { Button, buttonStyles } from '../ui/Button';
 import { ChatEntry } from './ChatEntry';
@@ -47,19 +46,7 @@ export function TimelinePanel({ lead, profile }: { lead: Lead; profile: LeadProf
   const removeMedia = useTimeline((s) => s.removeMedia);
   const retranscribe = useTimeline((s) => s.retranscribe);
   const canTranscribe = useTimeline((s) => s.features?.transcription.enabled === true);
-  const whatsappLinked = useWhatsApp((s) => s.status?.enabled === true && s.status.link.state === 'connected');
-  const fetchHistory = useWhatsApp((s) => s.fetchHistory);
-  const [asked, setAsked] = useState(false);
   useTick();
-
-  // New WhatsApp messages arrive on the server at any time: check for them while the profile is open
-  useEffect(() => {
-    if (!whatsappLinked) return;
-    const timer = setInterval(() => {
-      if (document.visibilityState === 'visible') void load(lead.id, true);
-    }, 20_000);
-    return () => clearInterval(timer);
-  }, [whatsappLinked, lead.id, load]);
 
   const items = useMemo(() => (profile ? describeTimeline(profile.interactions, profile.media) : []), [profile]);
   const loose = useMemo(() => (profile ? looseMedia(profile.media, profile.interactions) : []), [profile]);
@@ -105,22 +92,6 @@ export function TimelinePanel({ lead, profile }: { lead: Lead; profile: LeadProf
             <h4 className="mb-3 flex items-center gap-2 text-[13px] font-medium text-fg-muted">
               ציר זמן
               {items.length > 0 && <span className="text-[12.5px] font-normal tabular-nums text-fg-faint">{items.length}</span>}
-              {whatsappLinked && lead.phone.trim() && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="-my-1 ms-auto h-8"
-                  disabled={asked}
-                  title="מבקש מהטלפון שלך הודעות קודמות עם הליד. שום דבר לא נשלח לליד."
-                  onClick={() => {
-                    setAsked(true);
-                    void fetchHistory(lead.id).finally(() => setTimeout(() => setAsked(false), 10_000));
-                  }}
-                >
-                  <History className="size-4 text-[var(--whatsapp)]" aria-hidden />
-                  {asked ? 'ביקשנו מהטלפון…' : 'הודעות וואטסאפ קודמות'}
-                </Button>
-              )}
             </h4>
             <ol className="timeline-rail flex flex-col">
               <AnimatePresence initial={false}>

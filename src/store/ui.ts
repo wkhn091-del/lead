@@ -1,23 +1,44 @@
 import { create } from 'zustand';
-import type { SortKey, StageFilter } from '../lib/leads';
+import type { SortingState } from '@tanstack/react-table';
+import { BOARD_COLUMNS, type BoardColumn } from '../lib/board';
+import type { AddedFilter } from '../lib/leads-table';
+import { safeStorage } from '../lib/storage';
 import { applyThemePreference, readThemePreference, type ThemePreference } from '../lib/theme';
 
 export type View = 'dashboard' | 'today' | 'pipeline' | 'prospector' | 'training';
 const VIEWS: readonly View[] = ['dashboard', 'today', 'pipeline', 'prospector', 'training'];
+const BOARD_TAB_KEY = 'omek-crm:board-tab';
+const LAYOUT_KEY = 'omek-crm:leads-layout';
+
+/** How the leads show: a table, or a column per status */
+export type LeadsLayout = 'table' | 'board';
 /** The parts of a lead's profile */
 export type ProfileTab = 'timeline' | 'details' | 'coach';
 
 interface UiState {
   view: View;
+  /** The leads board's search */
   query: string;
-  stageFilter: StageFilter;
   /** Empty string for every campaign */
   campaignFilter: string;
-  sort: SortKey;
-  /** Lead whose details are open in the pipeline list */
-  expandedId: string | null;
-  /** Lead whose details are open in a dialog (from the Today view) */
+  /** The status a phone shows on the leads board, one at a time (wider screens show them all) */
+  boardTab: BoardColumn;
+  /** Whether the board shows the leads marked not relevant, in a column of their own */
+  showArchived: boolean;
+  leadsLayout: LeadsLayout;
+  /** The table's status filter; empty for every status but "not relevant" */
+  statusFilter: BoardColumn[];
+  /** When the leads shown were added */
+  addedFilter: AddedFilter;
+  /** The table's sort; empty for the most recently touched first */
+  tableSorting: SortingState;
+  /** Lead whose details are open in a dialog */
   detailsId: string | null;
+  /** Lead whose "תעד שיחה" dialog is open */
+  callLogId: string | null;
+  /** Lead whose WhatsApp message is being chosen, or the templates being edited (templatesOpen) */
+  whatsAppLeadId: string | null;
+  templatesOpen: boolean;
   /** The profile tab last chosen, shared by every lead */
   profileTab: ProfileTab;
   /** A timeline entry to open for writing when the timeline shows, like the step just logged from a daily card */
@@ -32,13 +53,21 @@ interface UiState {
   theme: ThemePreference;
   setView: (view: View) => void;
   setQuery: (query: string) => void;
-  setStageFilter: (filter: StageFilter) => void;
   setCampaignFilter: (campaign: string) => void;
-  setSort: (sort: SortKey) => void;
+  setBoardTab: (tab: BoardColumn) => void;
+  setShowArchived: (show: boolean) => void;
+  setLeadsLayout: (layout: LeadsLayout) => void;
+  toggleStatus: (status: BoardColumn) => void;
+  setStatusFilter: (statuses: BoardColumn[]) => void;
+  setAddedFilter: (added: AddedFilter) => void;
+  setTableSorting: (sorting: SortingState) => void;
   resetFilters: () => void;
-  toggleExpanded: (id: string) => void;
-  setExpanded: (id: string | null) => void;
   setDetailsId: (id: string | null) => void;
+  openCallLog: (id: string) => void;
+  closeCallLog: () => void;
+  openWhatsApp: (id: string) => void;
+  openTemplates: () => void;
+  closeWhatsApp: () => void;
   setProfileTab: (tab: ProfileTab) => void;
   /** Opens a lead's profile in a dialog, on a tab, optionally with one entry open for writing */
   openProfile: (id: string, tab?: ProfileTab, editEntryId?: string | null) => void;
@@ -51,10 +80,17 @@ interface UiState {
   setTheme: (theme: ThemePreference) => void;
 }
 
-/** The view in the address (#today, #pipeline…); the dashboard when there is none */
+/** The view in the address (#pipeline, #today…); the home screen (dashboard) when there is none */
 const readView = (): View => {
   const hash = typeof location !== 'undefined' ? location.hash.slice(1) : '';
   return VIEWS.find((view) => view === hash) ?? 'dashboard';
+};
+
+const readLayout = (): LeadsLayout => (safeStorage.get(LAYOUT_KEY) === 'board' ? 'board' : 'table');
+
+const readBoardTab = (): BoardColumn => {
+  const kept = safeStorage.get(BOARD_TAB_KEY);
+  return BOARD_COLUMNS.find((column) => column === kept) ?? 'new';
 };
 
 let highlightTimer: ReturnType<typeof setTimeout> | undefined;
@@ -62,11 +98,17 @@ let highlightTimer: ReturnType<typeof setTimeout> | undefined;
 export const useUi = create<UiState>()((set) => ({
   view: readView(),
   query: '',
-  stageFilter: 'all',
   campaignFilter: '',
-  sort: 'newest',
-  expandedId: null,
+  boardTab: readBoardTab(),
+  showArchived: false,
+  leadsLayout: readLayout(),
+  statusFilter: [],
+  addedFilter: 'all',
+  tableSorting: [],
   detailsId: null,
+  callLogId: null,
+  whatsAppLeadId: null,
+  templatesOpen: false,
   profileTab: 'timeline',
   editEntryId: null,
   highlightedIds: new Set(),
@@ -84,13 +126,30 @@ export const useUi = create<UiState>()((set) => ({
     set({ view });
   },
   setQuery: (query) => set({ query }),
-  setStageFilter: (stageFilter) => set({ stageFilter }),
   setCampaignFilter: (campaignFilter) => set({ campaignFilter }),
-  setSort: (sort) => set({ sort }),
-  resetFilters: () => set({ query: '', stageFilter: 'all', campaignFilter: '' }),
-  toggleExpanded: (id) => set((state) => ({ expandedId: state.expandedId === id ? null : id })),
-  setExpanded: (expandedId) => set({ expandedId }),
+  setBoardTab: (boardTab) => {
+    safeStorage.set(BOARD_TAB_KEY, boardTab);
+    set({ boardTab, ...(boardTab === 'archived' ? { showArchived: true } : {}) });
+  },
+  setShowArchived: (showArchived) => set((state) => ({ showArchived, boardTab: !showArchived && state.boardTab === 'archived' ? 'new' : state.boardTab })),
+  setLeadsLayout: (leadsLayout) => {
+    safeStorage.set(LAYOUT_KEY, leadsLayout);
+    set({ leadsLayout });
+  },
+  toggleStatus: (status) =>
+    set((state) => ({
+      statusFilter: state.statusFilter.includes(status) ? state.statusFilter.filter((item) => item !== status) : [...state.statusFilter, status],
+    })),
+  setStatusFilter: (statusFilter) => set({ statusFilter }),
+  setAddedFilter: (addedFilter) => set({ addedFilter }),
+  setTableSorting: (tableSorting) => set({ tableSorting }),
+  resetFilters: () => set({ query: '', campaignFilter: '', statusFilter: [], addedFilter: 'all' }),
   setDetailsId: (detailsId) => set({ detailsId }),
+  openCallLog: (callLogId) => set({ callLogId }),
+  closeCallLog: () => set({ callLogId: null }),
+  openWhatsApp: (whatsAppLeadId) => set({ whatsAppLeadId, templatesOpen: false }),
+  openTemplates: () => set({ whatsAppLeadId: null, templatesOpen: true }),
+  closeWhatsApp: () => set({ whatsAppLeadId: null, templatesOpen: false }),
   setProfileTab: (profileTab) => set({ profileTab }),
   openProfile: (detailsId, tab, editEntryId = null) =>
     set((state) => ({ detailsId, profileTab: tab ?? state.profileTab, editEntryId })),

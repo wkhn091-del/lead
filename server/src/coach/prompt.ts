@@ -24,9 +24,9 @@ const TEXT_BUDGET = 150_000;
 const MAX_ENTRIES = 300;
 const SHORTENED_LENGTH = 400;
 
-const STAGE_NAME = { cold_call: 'Cold Call', zoom: 'Zoom Meeting', closed: 'Deal Closed' } as const;
+const STAGE_NAME = { cold_call: 'Outreach', zoom: 'Quote', closed: 'Client (deal closed)' } as const;
 /** The stage names on the seller's screen (src/lib/stages.ts in the frontend) */
-const STAGE_LABEL = { cold_call: 'שיחה קרה', zoom: 'פגישת זום', closed: 'עסקה סגורה' } as const;
+const STAGE_LABEL = { cold_call: 'פנייה', zoom: 'הצעת מחיר', closed: 'נסגר / לקוח' } as const;
 
 const LANGUAGE_RULE: Record<CoachLanguage, string> = {
   auto: "Write every text field in the language the seller's notes are mostly written in (Hebrew or English). If there are no notes, use English.",
@@ -54,7 +54,7 @@ export const honestyRule = (sources = "the description of the seller's business 
   `In everything you write for the seller to say, claim only what is true: no statistics or invented figures, and no clients, results, reviews, years of experience, guarantees, discounts or payment terms beyond what ${sources} state. When an offer the seller doesn't make yet could help, suggest it to the seller as a tip; never put it in their mouth. An example is said as an example, never as a fact.`;
 
 /**
- * Each entry's title on the seller's timeline, oldest first: "ניסיון 1: אין מענה", "ניסיון 2: ענה ← פגישת זום".
+ * Each entry's title on the seller's timeline, oldest first: "ניסיון 1: אין מענה", "ניסיון 2: ענה ← הצעת מחיר".
  * Every logged phone call counts as an attempt. The frontend titles its timeline the same way (src/lib/timeline.ts),
  * so the coach can point to an entry by the name the seller sees on screen.
  */
@@ -64,6 +64,7 @@ export function describeEntries(oldestFirst: InteractionRecord[]): string[] {
     // In Hebrew the arrow points left, the way the text runs
     const moved = entry.stageTo ? ` ← ${STAGE_LABEL[entry.stageTo]}` : '';
     if (entry.step === 'archived') return 'סומן כלא רלוונטי';
+    if (entry.step === 'whatsapp') return 'נשלח וואטסאפ';
     switch (entry.kind) {
       case 'call':
         attempt += 1;
@@ -237,16 +238,16 @@ About the seller's business:
 ${input.businessContext.trim() || DEFAULT_BUSINESS_CONTEXT}
 
 How the seller sells:
-- Cold Call: they call businesses from a weekly list, one niche (campaign) at a time, to book a Zoom meeting.
-- Zoom Meeting: they present and propose, aiming to close.
-- Deal Closed: the client signed. Leads that aren't a fit are marked not relevant and leave the pipeline.
+- Outreach: they call businesses from a list, one niche (campaign) at a time, and send them WhatsApp messages, until the prospect wants a price quote. On the seller's board a lead here is "חדש" (new, not contacted yet), "נוצר קשר" (called) or "נשלח וואטסאפ" (messaged).
+- Quote: they send or present a price quote, by phone, WhatsApp or a Zoom meeting, aiming to close.
+- Client (deal closed): the client signed. Leads that aren't a fit are marked not relevant and leave the pipeline.
 - "No answer" means the call wasn't picked up; those leads stay in the calling pool.
 
 The seller's screen is in Hebrew, and each timeline entry's type is its title there:
 - "ניסיון N" is the Nth phone call (attempt N): "ענה" answered, "אין מענה" no answer.
-- "← <stage>" means the step moved the lead to that stage: "שיחה קרה" Cold Call, "פגישת זום" Zoom Meeting, "עסקה סגורה" Deal Closed.
+- "← <stage>" means the step moved the lead to that stage: "פנייה" Outreach, "הצעת מחיר" Quote, "נסגר / לקוח" Client (deal closed).
 - "פגישת זום התקיימה" a Zoom meeting held; "פגישת זום: הליד לא הגיע" a Zoom no-show.
-- "הודעת וואטסאפ" a WhatsApp message the seller logged by hand; "שיחת וואטסאפ" a WhatsApp chat mirrored from the phone.
+- "נשלח וואטסאפ" a WhatsApp message the seller sent from the app; "הודעת וואטסאפ" a WhatsApp message the seller logged by hand; "שיחת וואטסאפ" a WhatsApp chat mirrored from the phone.
 - "הערה" a note, "אימייל" an email, "סומן כלא רלוונטי" marked not relevant.
 
 How to coach:

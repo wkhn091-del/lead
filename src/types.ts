@@ -16,7 +16,8 @@ export interface LeadNote {
   createdAt: string;
 }
 
-export type ActivityType = 'advanced' | 'no_answer' | 'answered' | 'archived';
+/** A step: moved on, a call nobody picked up, a conversation, marked not relevant, or a WhatsApp message sent */
+export type ActivityType = 'advanced' | 'no_answer' | 'answered' | 'archived' | 'whatsapp';
 
 /** One logged step on a lead */
 export interface Activity {
@@ -34,11 +35,11 @@ export interface Activity {
 
 /**
  * Advance to the next stage, log a call nobody picked up, log a conversation that didn't move the deal
- * ("call me next month"), or mark not relevant
+ * ("call me next month"), mark not relevant, or log a WhatsApp message sent to the lead
  */
-export type ActionType = 'advance' | 'no_answer' | 'answered' | 'archive';
+export type ActionType = 'advance' | 'no_answer' | 'answered' | 'archive' | 'whatsapp';
 
-/** How a conversation happened. By default a phone call at Cold Call and a Zoom meeting at Zoom Meeting. */
+/** How a conversation happened. By default a phone call at the outreach stage and a Zoom meeting at the quote stage. */
 export type Channel = 'call' | 'zoom';
 
 export interface LeadAction {
@@ -275,42 +276,13 @@ export interface LeadTimeline {
 export interface Features {
   /** Null when no AI provider is set up */
   coach: { provider: string; model: string } | null;
-  media: { storage: 'local' | 's3' | 'browser'; maxUploadMb: number };
+  /** `persistent`: false when the server keeps recordings on a disk its next deploy replaces. Missing on older servers. */
+  media: { storage: 'local' | 's3' | 'browser'; maxUploadMb: number; persistent?: boolean };
   /** Automatic transcripts of uploaded recordings, or why they are off */
   transcription: { enabled: true; service: string; model: string } | { enabled: false; reason: string };
-  /** The read-only WhatsApp sync, or why it is off. Missing on servers from before it existed. */
-  whatsapp?: { enabled: true } | { enabled: false; reason: string };
   /** The Prospector, or why it is off. Missing on servers from before it existed. */
   prospector?: { enabled: true; provider: ProspectProvider; backup?: ProspectProvider | null; browser: boolean; ai: boolean } | { enabled: false; reason: string };
 }
-
-/** Where the WhatsApp link stands (server/src/whatsapp/service.ts) */
-export type WhatsAppLinkState =
-  | { state: 'unlinked'; reason?: string }
-  | { state: 'linking'; method: 'qr'; qr: string; expiresAt: string }
-  | { state: 'linking'; method: 'code'; code: string | null; phone: string }
-  | { state: 'connecting' }
-  | { state: 'connected'; since: string; phone: string; name: string | null }
-  | { state: 'reconnecting'; attempt: number; retryAt: string; reason: string }
-  | { state: 'stopped'; reason: string };
-
-export interface WhatsAppGuardStatus {
-  /** The guard proved on the live connection that it stops outgoing messages */
-  selfTest: 'pending' | 'passed' | 'failed';
-  blocked: number;
-  critical: number;
-  recent: { at: string; severity: 'quiet' | 'critical'; what: string; layer: 'method' | 'message' | 'wire' }[];
-}
-
-export type WhatsAppStatus =
-  | {
-      enabled: true;
-      link: WhatsAppLinkState;
-      guard: WhatsAppGuardStatus;
-      sync: { messages: number; lastMessageAt: string | null; historyProgress: number | null; voiceNotesWaiting: number };
-      settings: { history: 'full' | 'recent'; voiceNoteDays: number; transcribes: boolean };
-    }
-  | { enabled: false; reason: string };
 
 export type ObjectionCategory = 'price' | 'timing' | 'trust' | 'need' | 'authority' | 'competition' | 'diy' | 'other';
 

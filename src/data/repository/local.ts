@@ -43,7 +43,6 @@ const TRAINING_KEY = 'omek-crm:training:v1';
 const PROSPECTOR_DEMO_KEY = 'omek-crm:prospector-demo:v1';
 
 // Said the way the preview (the app without a server) explains itself; PreviewBanner points to the connected app
-const SERVER_ONLY_WHATSAPP = 'זו התצוגה המקדימה, בלי שרת. סנכרון הוואטסאפ (לקריאה בלבד) עובד באפליקציה שמחוברת לשרת.';
 
 const SERVER_ONLY_TAILORING = 'זו התצוגה המקדימה, בלי שרת, אז התשובות כלליות. התאמה לסוג עסק עובדת באפליקציה שמחוברת לשרת.';
 
@@ -292,17 +291,17 @@ export function createLocalRepository(): LeadRepository {
       return lead;
     },
     createMany,
-    async importJson(items) {
+    async importJson(items, mapping = {}) {
       // The server's rules, against the leads in this browser
-      const plan = planJsonImport(items, read(), appConfig.defaultCountryCode);
+      const plan = planJsonImport(items, read(), appConfig.defaultCountryCode, mapping);
       const rows = plan.leads.map(
         (draft): ParsedRow => ({
           key: String(draft.index),
           name: draft.name,
-          contactName: '',
+          contactName: draft.contactName,
           phone: draft.phone,
-          email: '',
-          website: '',
+          email: draft.email,
+          website: draft.website,
           campaign: draft.campaign,
           approach: '',
           method: 'call',
@@ -473,29 +472,10 @@ export function createLocalRepository(): LeadRepository {
     async features() {
       return {
         coach: null,
-        media: { storage: 'browser', maxUploadMb: LOCAL_UPLOAD_MB },
+        media: { storage: 'browser', maxUploadMb: LOCAL_UPLOAD_MB, persistent: true },
         transcription: { enabled: false, reason: 'התמלול נעשה בשרת, עם ffmpeg ומפתח של OpenAI.' },
-        whatsapp: { enabled: false, reason: SERVER_ONLY_WHATSAPP },
         prospector: { enabled: false, reason: SERVER_ONLY_PROSPECTOR },
       };
-    },
-    async whatsappStatus() {
-      return { enabled: false, reason: SERVER_ONLY_WHATSAPP };
-    },
-    async linkWhatsApp() {
-      throw new Error(SERVER_ONLY_WHATSAPP);
-    },
-    async reconnectWhatsApp() {
-      throw new Error(SERVER_ONLY_WHATSAPP);
-    },
-    async unlinkWhatsApp() {
-      throw new Error(SERVER_ONLY_WHATSAPP);
-    },
-    async fetchWhatsAppHistory() {
-      return { requested: false, message: SERVER_ONLY_WHATSAPP };
-    },
-    async fetchVoiceNote() {
-      throw new Error(SERVER_ONLY_WHATSAPP);
     },
     async trainingDeck() {
       return structuredClone(readDeck());

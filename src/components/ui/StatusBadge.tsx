@@ -20,7 +20,7 @@ export function ToneBadge({ meta, className }: { meta: ToneMeta; className?: str
 }
 
 /** The lead's stage, or "לא רלוונטי" once archived */
-export const LeadBadge = ({ lead, className }: { lead: Pick<Lead, 'stage' | 'archivedAt'>; className?: string }) => (
+export const LeadBadge = ({ lead, className }: { lead: Pick<Lead, 'stage' | 'archivedAt' | 'activity'>; className?: string }) => (
   <ToneBadge meta={leadBadge(lead)} className={className} />
 );
 

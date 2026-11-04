@@ -42,13 +42,22 @@ const shortDate = new Intl.DateTimeFormat(appConfig.locale, { month: 'short', da
 const longDate = new Intl.DateTimeFormat(appConfig.locale, { month: 'short', day: 'numeric', year: 'numeric' });
 const relative = new Intl.RelativeTimeFormat(appConfig.locale, { numeric: 'auto', style: 'short' });
 
-/** "עכשיו", "לפני 12 דק׳", "לפני שעתיים", "אתמול", "לפני 4 ימים", then a date ("26 באוק׳"). */
+/**
+ * Hebrew relative time as the browser writes it, without the count some versions add in brackets after a word that
+ * already says it ("לפני שעתיים (2)"), and with the whole word for one ("לפני דקה", not "לפני דק׳ (1)")
+ */
+const relativeAgo = (amount: number, unit: 'minute' | 'hour') => {
+  if (amount === 1) return unit === 'minute' ? 'לפני דקה' : 'לפני שעה';
+  return relative.format(-amount, unit).replace(/\s*\(\d+\)$/, '');
+};
+
+/** "עכשיו", "לפני דקה", "לפני 12 דק׳", "לפני שעתיים", "אתמול", "לפני 4 ימים", then a date ("26 באוק׳"). */
 export function formatRelative(iso: string, now = Date.now()): string {
   const time = Date.parse(iso);
   const elapsed = Math.max(0, now - time);
   if (elapsed < MINUTE) return 'עכשיו';
-  if (elapsed < HOUR) return relative.format(-Math.floor(elapsed / MINUTE), 'minute');
-  if (elapsed < DAY) return relative.format(-Math.floor(elapsed / HOUR), 'hour');
+  if (elapsed < HOUR) return relativeAgo(Math.floor(elapsed / MINUTE), 'minute');
+  if (elapsed < DAY) return relativeAgo(Math.floor(elapsed / HOUR), 'hour');
   if (elapsed < 7 * DAY) {
     // Calendar days, so last night at 23:00 reads "אתמול" in the morning
     const days = Math.round((startOfDay(now) - startOfDay(time)) / DAY);

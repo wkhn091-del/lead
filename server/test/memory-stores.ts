@@ -15,10 +15,9 @@ import {
   type ObjectionVariantRecord,
   type Stores,
   type TrainingRunRecord,
-  type WhatsAppChatRecord,
-} from './types.js';
-import type { ProspectRecord, ProspectSearchRecord } from '../prospector/types.js';
-import { sameWording, wordingOf } from '../training/starter.js';
+} from '../src/stores/types.js';
+import type { ProspectRecord, ProspectSearchRecord } from '../src/prospector/types.js';
+import { sameWording, wordingOf } from '../src/training/starter.js';
 
 const newestFirst = (a: { createdAt: Date }, b: { createdAt: Date }) => b.createdAt.getTime() - a.createdAt.getTime();
 
@@ -29,15 +28,16 @@ function stamp(): Date {
   return new Date(lastStamp);
 }
 
-/** In-memory stores that behave like the Prisma ones. Used by the tests and by STORAGE=memory for local development. */
+/**
+ * In-memory stores that behave like the Prisma ones, for the tests only: the server itself always keeps its data in
+ * MongoDB (src/stores/prisma.ts). With TEST_DATABASE_URL set, the same tests run against MongoDB (test/stores.ts).
+ */
 export function createMemoryStores(): Stores {
   const leads = new Map<string, LeadRecord>();
   const interactions = new Map<string, InteractionRecord>();
   const media = new Map<string, MediaRecord>();
   const reports: CoachingRecord[] = [];
   const queues = new Map<string, { leadIds: string[]; version: number }>();
-  const chats = new Map<string, WhatsAppChatRecord>();
-  const auth = new Map<string, string>();
   const cards = new Map<string, ObjectionCardRecord>();
   const runs: TrainingRunRecord[] = [];
   const variants = new Map<string, ObjectionVariantRecord>();
@@ -154,29 +154,6 @@ export function createMemoryStores(): Stores {
       async removeForLeads(leadIds) {
         for (const [id, item] of interactions) if (leadIds.includes(item.leadId)) interactions.delete(id);
       },
-      async writeChat(leadId, id, change) {
-        const found = interactions.get(id);
-        const current = found && found.leadId === leadId ? copy(found) : null;
-        const next = change(current);
-        if (!next) return current;
-        const record: InteractionRecord = current
-          ? { ...current, chat: copy(next.chat), body: next.body, at: next.at, updatedAt: stamp() }
-          : { ...next.create, source: 'whatsapp', chat: copy(next.chat), body: next.body, at: next.at, updatedAt: stamp() };
-        interactions.set(id, record);
-        return copy(record);
-      },
-      async findChatEntry(leadId, messageId) {
-        for (const item of interactions.values()) {
-          if (item.leadId === leadId && item.chat.some((line) => line.id === messageId)) return copy(item);
-        }
-        return null;
-      },
-      async oldestChat(leadId) {
-        const found = [...interactions.values()]
-          .filter((item) => item.leadId === leadId && item.source === 'whatsapp')
-          .sort((a, b) => a.at.getTime() - b.at.getTime())[0];
-        return found ? copy(found) : null;
-      },
       async latestByLead(leadIds) {
         const wanted = new Set(leadIds);
         const found = new Map<string, LatestEntries>();
@@ -267,33 +244,6 @@ export function createMemoryStores(): Stores {
         if (!queue || queue.version !== version) return false;
         queues.set(date, { leadIds: [...leadIds], version: version + 1 });
         return true;
-      },
-    },
-    whatsapp: {
-      async saveChats(list) {
-        for (const chat of list) {
-          const seen = chats.get(chat.jid);
-          if (!seen || seen.lastAt < chat.lastAt) chats.set(chat.jid, { ...chat, phone: chat.phone ?? seen?.phone ?? null });
-          else if (chat.phone && !seen.phone) seen.phone = chat.phone;
-        }
-      },
-      async findChatsByPhone(phones) {
-        return [...chats.values()]
-          .filter((chat) => chat.phone !== null && phones.includes(chat.phone))
-          .sort((a, b) => b.lastAt.getTime() - a.lastAt.getTime())
-          .map(copy);
-      },
-      async readAuth(ids) {
-        return new Map(ids.filter((id) => auth.has(id)).map((id) => [id, auth.get(id)!]));
-      },
-      async writeAuth(entries) {
-        for (const { id, value } of entries) {
-          if (value === null) auth.delete(id);
-          else auth.set(id, value);
-        }
-      },
-      async clearAuth() {
-        auth.clear();
       },
     },
     training: {

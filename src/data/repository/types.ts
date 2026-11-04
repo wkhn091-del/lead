@@ -24,11 +24,10 @@ import type {
   StepDetails,
   TrainingDeck,
   TrainingNiche,
-  WhatsAppStatus,
 } from '../../types';
-import type { JsonSkip } from '../../../server/src/leads/json-import';
+import type { JsonMapping, JsonSkip } from '../../../server/src/leads/json-import';
 
-export type { JsonSkip, JsonSkipReason } from '../../../server/src/leads/json-import';
+export type { JsonMapping, JsonSkip, JsonSkipReason } from '../../../server/src/leads/json-import';
 
 export interface BulkCreateResult {
   /** Leads stored by this call */
@@ -79,10 +78,11 @@ export interface LeadRepository {
   /** Stores up to 500 leads at once; ids that already exist are skipped, not overwritten */
   createMany(leads: NewLead[]): Promise<BulkCreateResult>;
   /**
-   * Leads pasted as a JSON array of { name, phone, source, niche, notes }, up to 1,000 at once. Only leads whose
-   * phone number isn't on any lead yet are stored; the rest come back in `skipped` with the reason.
+   * Leads pasted as a JSON array of { name, phone, source, niche, notes }, up to 1,000 at once, each field found by
+   * any of its usual names or from the key `mapping` chose for it. Only leads whose phone number isn't on any lead
+   * yet are stored, every one as a new lead; the rest come back in `skipped` with the reason.
    */
-  importJson(items: unknown[]): Promise<JsonImportResult>;
+  importJson(items: unknown[], mapping?: JsonMapping): Promise<JsonImportResult>;
   /** Details only. A value can be set once the deal is closed. */
   update(id: string, patch: LeadPatch): Promise<Lead>;
   /**
@@ -125,18 +125,6 @@ export interface LeadRepository {
   features(): Promise<Features>;
   /** Adds the sample leads with their timelines. Only where leads are kept in this browser. */
   addSamples?(): Promise<Lead[]>;
-
-  /** The read-only WhatsApp link: its state, the guard's report and the sync's progress */
-  whatsappStatus(): Promise<WhatsAppStatus>;
-  /** Starts linking: a QR code, or a code to type on the phone when `phone` is given */
-  linkWhatsApp(phone?: string): Promise<WhatsAppStatus>;
-  reconnectWhatsApp(): Promise<WhatsAppStatus>;
-  /** Removes this server from your phone's linked devices. Mirrored conversations stay. */
-  unlinkWhatsApp(): Promise<WhatsAppStatus & { removedFromPhone?: boolean }>;
-  /** Asks your phone for older messages with this lead. Resolves to what to tell you. */
-  fetchWhatsAppHistory(leadId: string): Promise<{ requested: boolean; message: string }>;
-  /** Downloads (and transcribes) an older voice note */
-  fetchVoiceNote(leadId: string, messageId: string): Promise<void>;
 
   /** The objection deck */
   trainingDeck(): Promise<TrainingDeck>;

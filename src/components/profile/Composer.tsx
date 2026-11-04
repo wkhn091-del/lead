@@ -59,7 +59,7 @@ const KINDS: Record<Kind, KindOption> = {
 };
 
 interface Outcome {
-  type: ActionType;
+  type: Exclude<ActionType, 'whatsapp'>;
   label: string;
   icon: LucideIcon;
   tone: string;
@@ -70,7 +70,7 @@ function outcomesFor(kind: 'call' | 'zoom', stage: Stage): Outcome[] {
   const closes = stage === 'zoom';
   const advance: Outcome = closes
     ? { type: 'advance', label: 'העסקה נסגרה', icon: Handshake, tone: 'var(--st-won)' }
-    : { type: 'advance', label: 'נקבע זום', icon: Video, tone: 'var(--st-zoom)' };
+    : { type: 'advance', label: STAGE_META.zoom.label, icon: STAGE_META.zoom.icon, tone: STAGE_META.zoom.tone };
   const archive: Outcome = { type: 'archive', label: 'לא רלוונטי', icon: Archive, tone: 'var(--st-lost)' };
   if (kind === 'zoom') {
     return [
@@ -115,6 +115,8 @@ export function Composer({ lead }: { lead: Lead }) {
   const addMessage = useTimeline((s) => s.addMessage);
   const upload = useTimeline((s) => s.upload);
   const maxMb = useTimeline((s) => s.features?.media.maxUploadMb ?? 500);
+  // A server that keeps recordings on a disk its next deploy replaces (Render without S3) would lose them
+  const recordingsKept = useTimeline((s) => s.features?.media.persistent !== false);
   const transcripts = useTimeline((s) => s.features?.transcription);
   const setProfileTab = useUi((s) => s.setProfileTab);
   const [draft, setDraft] = useState<Draft>(
@@ -156,7 +158,17 @@ export function Composer({ lead }: { lead: Lead }) {
     if (!file) return;
     const problem = recordingProblem(file, maxMb);
     if (problem) toast.error('אי אפשר לצרף את הקובץ הזה.', problem);
-    else update({ file });
+    else {
+      update({ file });
+      if (!recordingsKept) {
+        toast.show({
+          tone: 'error',
+          message: 'ההקלטה תימחק בעדכון הבא של השרת',
+          description: 'השרת שומר הקלטות על דיסק שמתחלף בכל עדכון. כדי שיישמרו: MEDIA_STORAGE=s3 (S3 או Cloudflare R2) בהגדרות השרת.',
+          duration: 10_000,
+        });
+      }
+    }
   };
 
   const clear = () => {
@@ -185,6 +197,17 @@ export function Composer({ lead }: { lead: Lead }) {
         action: { label: 'ביטול', onClick: () => undo(lead.id, result.id) },
       });
       if (closing) setProfileTab('details');
+    } else if (kind === 'whatsapp' && open && text) {
+      // A message to a lead still being worked moves it on the board, to "נשלח וואטסאפ" during outreach
+      const result = act(lead.id, 'whatsapp', { body: text });
+      if (!result) return;
+      if (draft.file) upload(lead.id, draft.file, result.id, result.saved);
+      toast.show({
+        message: 'הודעת הוואטסאפ תועדה',
+        description: lead.stage === 'cold_call' ? 'הליד עבר ל״נשלח וואטסאפ״.' : undefined,
+        duration: 8000,
+        action: { label: 'ביטול', onClick: () => undo(lead.id, result.id) },
+      });
     } else if (text) {
       const result = addMessage(lead, kind as MessageKind, text);
       if (result && draft.file) upload(lead.id, draft.file, result.id, result.saved);

@@ -1,4 +1,4 @@
-import { Download, LoaderCircle, Lock, MessageCircle, Mic, PhoneMissed, RotateCcw, TriangleAlert } from 'lucide-react';
+import { LoaderCircle, Lock, MessageCircle, Mic, PhoneMissed, RotateCcw, TriangleAlert } from 'lucide-react';
 import { useState } from 'react';
 import { appConfig } from '../../config';
 import { callLabel, chatSpan, formatSeconds, LINE_LABEL } from '../../lib/chat';
@@ -8,7 +8,6 @@ import { count, NOUNS } from '../../lib/hebrew';
 import { toneStyle } from '../../lib/stages';
 import { isTranscribing, type TimelineItem } from '../../lib/timeline';
 import { useTimeline } from '../../store/timeline';
-import { useWhatsApp } from '../../store/whatsapp';
 import type { ChatLine, Lead, MediaFile } from '../../types';
 import { Button } from '../ui/Button';
 import { MediaPlayer } from './MediaPlayer';
@@ -20,8 +19,8 @@ const clock = new Intl.DateTimeFormat(appConfig.locale, { hour: 'numeric', minut
 const FOLDED = 8;
 
 /**
- * A day of WhatsApp messages with the lead, mirrored from the linked phone. It can't be edited or deleted
- * here, and nothing can be sent from it: replies go from your phone.
+ * A day of WhatsApp messages with the lead, mirrored by the earlier WhatsApp sync and kept as it was. It can't be
+ * edited or deleted here, and nothing can be sent from it: replies go from your phone.
  */
 export function ChatEntry({ item, lead }: { item: TimelineItem; lead: Lead }) {
   const { entry, media } = item;
@@ -98,8 +97,6 @@ function Bubble({ line, lead, them, media }: { line: ChatLine; lead: Lead; them:
 
 function Content({ line, lead, media }: { line: ChatLine; lead: Lead; media: MediaFile | undefined }) {
   const retranscribe = useTimeline((s) => s.retranscribe);
-  const fetchVoiceNote = useWhatsApp((s) => s.fetchVoiceNote);
-  const [asked, setAsked] = useState(false);
 
   if (line.deleted) return <p className="text-[13.5px] text-fg-faint italic">ההודעה נמחקה</p>;
   if (line.type === 'text') return <p dir="auto" className="text-[14px] leading-relaxed break-words whitespace-pre-wrap">{line.text}</p>;
@@ -139,20 +136,6 @@ function Content({ line, lead, media }: { line: ChatLine; lead: Lead; media: Med
             לנסות שוב
           </Button>
         </p>
-      ) : line.canFetch ? (
-        <Button
-          size="sm"
-          variant="ghost"
-          className="h-8 self-start px-2"
-          disabled={asked}
-          onClick={() => {
-            setAsked(true);
-            void fetchVoiceNote(lead.id, line.id);
-          }}
-        >
-          {asked ? <LoaderCircle className="size-3.5 animate-spin" aria-hidden /> : <Download className="size-3.5" aria-hidden />}
-          {asked ? 'מוריד מהוואטסאפ…' : 'הורדה ותמלול'}
-        </Button>
       ) : line.mediaError ? (
         <p className="text-[12.5px] text-fg-faint">{line.mediaError}</p>
       ) : !media && !line.mediaId ? (

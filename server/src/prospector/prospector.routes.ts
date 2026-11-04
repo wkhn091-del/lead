@@ -70,10 +70,6 @@ function prospectView(prospect: ProspectRecord) {
   };
 }
 
-export interface ProspectorHooks {
-  /** New leads were added (the WhatsApp sync looks for their chats) */
-  leadsChanged?(created: string[]): void;
-}
 
 export function createProspectorRouter(
   stores: Stores,
@@ -82,7 +78,6 @@ export function createProspectorRouter(
   off: string,
   countryCode: string,
   clock: () => Date,
-  hooks: ProspectorHooks = {},
 ) {
   const router = Router();
   const store = stores.prospector;
@@ -222,7 +217,6 @@ export function createProspectorRouter(
       for (const { prospect, lead } of planned) {
         if (createdIds.has(lead.id)) await store.markImported(prospect.id, lead.id, now);
       }
-      if (created.length) hooks.leadsChanged?.(created.map((lead) => lead.id));
     }
     res.status(201).json({ created, skipped });
   });
