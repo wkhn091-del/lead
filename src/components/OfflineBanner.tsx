@@ -24,12 +24,20 @@ export function OfflineBanner({ onRetry }: { onRetry: () => void }) {
     const timer = setInterval(() => setNow(Date.now()), 30_000);
     return () => clearInterval(timer);
   }, [keptAt]);
+  // The copy is on the screen from the first frame: a server that answers within a moment needs no word
+  const [waited, setWaited] = useState(false);
+  useEffect(() => {
+    setWaited(false);
+    if (!keptAt) return;
+    const timer = setTimeout(() => setWaited(true), 1500);
+    return () => clearTimeout(timer);
+  }, [keptAt]);
 
   const updated = keptAt ? ` (עודכן ${formatRelative(new Date(keptAt).toISOString(), now)})` : '';
 
   return (
     <AnimatePresence initial={false}>
-      {(keptAt !== null || nothing) && (
+      {((keptAt !== null && (offline || waited)) || nothing) && (
         <motion.div
           initial={{ opacity: 0, height: 0 }}
           animate={{ opacity: 1, height: 'auto' }}

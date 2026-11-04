@@ -5,7 +5,6 @@ import { z } from 'zod';
 import { AI_PROVIDERS, DEFAULT_MODELS } from './coach/providers.js';
 import { DEFAULT_TRANSCRIBE_MODEL } from './transcription/openai.js';
 import { isValidTimeZone } from './daily/time.js';
-import { parseAuthKey } from './whatsapp/auth-key.js';
 import { PROSPECT_PROVIDERS } from './prospector/types.js';
 import { parseOrigins } from './lib/origins.js';
 
@@ -25,8 +24,7 @@ const Env = z
   .object({
     NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
     PORT: z.coerce.number().int().min(1).max(65_535).default(4000),
-    /** mongodb, or memory to try the app without a database (development only) */
-    STORAGE: z.enum(['mongodb', 'memory']).default('mongodb'),
+    /** The MongoDB connection string (Atlas, or the local one from docker-compose.yml): the only storage there is */
     DATABASE_URL: z.string().trim().optional(),
     CORS_ORIGINS: originList,
     TRUST_PROXY: z.coerce.number().int().min(0).max(10).default(0),
@@ -39,6 +37,10 @@ const Env = z
     AI_PROVIDER: optional(z.enum(AI_PROVIDERS)),
     AI_API_KEY: optional(z.string().trim()),
     AI_MODEL: optional(z.string().trim().max(100)),
+    /** Another model of the same provider, used when AI_MODEL stays overloaded, runs out of quota or isn't found */
+    AI_FALLBACK_MODEL: optional(z.string().trim().max(100)),
+    /** AI requests in flight at once, from the coach, training and the Prospector together (free tiers allow few) */
+    AI_MAX_CONCURRENT: z.coerce.number().int().min(1).max(20).default(2),
     AI_BASE_URL: optional(z.url({ protocol: /^https?$/ })),
     /** What you sell, in a sentence or two, so the coach's advice and scripts fit your offer */
     AI_BUSINESS_CONTEXT: optional(z.string().trim().max(2000)),
@@ -46,6 +48,8 @@ const Env = z
     /** Where call and Zoom recordings are kept */
     MEDIA_STORAGE: z.enum(['local', 's3']).default('local'),
     MEDIA_DIR: z.string().default('./uploads'),
+    /** on: MEDIA_DIR is on a disk that survives deploys (a Render Disk, a Fly volume), so local recordings are kept */
+    MEDIA_PERSISTENT_DISK: z.enum(['on', 'off']).default('off'),
     MAX_UPLOAD_MB: z.coerce.number().int().min(1).max(5000).default(500),
     S3_BUCKET: optional(z.string().trim()),
     S3_REGION: optional(z.string().trim()),
@@ -69,17 +73,9 @@ const Env = z
     TRANSCRIBE_PART_MINUTES: z.coerce.number().min(1).max(45).default(10),
     FFMPEG_PATH: optional(z.string().trim()),
 
-    /** Read-only WhatsApp sync: mirrors chats with leads onto their timelines. Never sends anything. */
-    WHATSAPP: z.enum(['on', 'off']).default('off'),
-    /** 32 random bytes (openssl rand -base64 32) that seal the linked device's keys in the database */
-    WHATSAPP_AUTH_KEY: optional(z.string().trim()),
-    /** Country code for lead numbers written without one: 054… becomes 97254… */
-    WHATSAPP_COUNTRY_CODE: z.string().trim().regex(/^[1-9]\d{0,3}$/, 'Use the digits of a country code, like 972.').default('972'),
-    /** full: everything your phone has when you link; recent: the last few months */
-    WHATSAPP_HISTORY: z.enum(['full', 'recent']).default('full'),
-    /** Voice notes newer than this many days are downloaded and transcribed as they sync; older ones on request */
-    WHATSAPP_VOICE_DAYS: z.coerce.number().int().min(0).max(3650).default(30),
-    WHATSAPP_LOG: z.enum(['error', 'warn', 'info', 'debug']).default('warn'),
+    /** Country code for lead numbers written without one: 054… is read as 97254… (WHATSAPP_COUNTRY_CODE is read too) */
+    COUNTRY_CODE: optional(z.string().trim().regex(/^[1-9]\d{0,3}$/, 'Use the digits of a country code, like 972.')),
+    WHATSAPP_COUNTRY_CODE: optional(z.string().trim().regex(/^[1-9]\d{0,3}$/, 'Use the digits of a country code, like 972.')),
 
     /**
      * The Prospector finds businesses with serpapi (SERPAPI_KEY) or google (GOOGLE_PLACES_API_KEY). This picks the
@@ -121,13 +117,6 @@ const Env = z
         problem('S3_SECRET_ACCESS_KEY', 'Set both S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY, or neither (to use the AWS credentials of the machine).');
       }
     }
-    if (env.WHATSAPP === 'on') {
-      if (env.WHATSAPP_AUTH_KEY && !parseAuthKey(env.WHATSAPP_AUTH_KEY)) {
-        problem('WHATSAPP_AUTH_KEY', 'Use 32 random bytes in base64: create one with `openssl rand -base64 32`.');
-      } else if (!env.WHATSAPP_AUTH_KEY && env.STORAGE !== 'memory') {
-        problem('WHATSAPP_AUTH_KEY', 'Set WHATSAPP_AUTH_KEY (create one with `openssl rand -base64 32`): it seals the WhatsApp link in the database.');
-      }
-    }
     if (env.PROSPECTOR_PROVIDER === 'google' && !env.GOOGLE_PLACES_API_KEY) {
       problem('GOOGLE_PLACES_API_KEY', 'Set GOOGLE_PLACES_API_KEY (a Google Cloud key with Places API (New) on), or choose PROSPECTOR_PROVIDER=serpapi.');
     }
@@ -136,12 +125,6 @@ const Env = z
     }
     if (env.PROSPECTOR_ALLOW_PRIVATE_NETWORK === 'on' && env.NODE_ENV === 'production') {
       problem('PROSPECTOR_ALLOW_PRIVATE_NETWORK', 'Opening private-network addresses is for development only.');
-    }
-    if (env.STORAGE === 'memory') {
-      if (env.NODE_ENV === 'production') {
-        problem('STORAGE', 'In-memory storage loses every lead on restart, so it only runs in development.');
-      }
-      return;
     }
     const url = env.DATABASE_URL ?? '';
     if (!/^mongodb(\+srv)?:\/\//.test(url)) {
@@ -161,12 +144,22 @@ if (!parsed.success) {
 const env = parsed.data;
 const isProduction = env.NODE_ENV === 'production';
 
+// Settings from earlier versions that no longer do anything, so a leftover one isn't mistaken for working
+if (process.env.STORAGE) {
+  console.warn(`STORAGE=${process.env.STORAGE} is no longer read: the server always keeps its data in MongoDB (DATABASE_URL). Remove it.`);
+}
+if (process.env.WHATSAPP || process.env.WHATSAPP_AUTH_KEY) {
+  console.warn('WHATSAPP and WHATSAPP_AUTH_KEY are no longer read: WhatsApp opens from the app (wa.me links), without a server link. Remove them.');
+}
+
 export const config = {
   env: env.NODE_ENV,
   isProduction,
   port: env.PORT,
-  storage: env.STORAGE,
-  databaseUrl: env.DATABASE_URL,
+  /** Checked above: a mongodb:// or mongodb+srv:// string with a database name */
+  databaseUrl: env.DATABASE_URL ?? '',
+  /** For lead numbers written without one: 054… is 97254… */
+  countryCode: env.COUNTRY_CODE ?? env.WHATSAPP_COUNTRY_CODE ?? '972',
   /** Frontend origins allowed to call the API from another domain. Empty means same-origin only. */
   corsOrigins: env.CORS_ORIGINS,
   /** Proxy hops in front of the app (1 on Render, Railway, Fly or Heroku) */
@@ -181,6 +174,8 @@ export const config = {
         provider: env.AI_PROVIDER,
         apiKey: env.AI_API_KEY ?? '',
         model: env.AI_MODEL ?? DEFAULT_MODELS[env.AI_PROVIDER],
+        fallbackModel: env.AI_FALLBACK_MODEL,
+        maxConcurrent: env.AI_MAX_CONCURRENT,
         baseUrl: env.AI_BASE_URL,
         businessContext: env.AI_BUSINESS_CONTEXT ?? '',
       }
@@ -195,15 +190,6 @@ export const config = {
     partSeconds: Math.round(env.TRANSCRIBE_PART_MINUTES * 60),
     ffmpegPath: env.FFMPEG_PATH,
     off: env.TRANSCRIBE === 'off',
-  },
-  whatsapp: {
-    enabled: env.WHATSAPP === 'on',
-    /** Null only with in-memory storage, where the link lasts until the server stops */
-    authKey: env.WHATSAPP_AUTH_KEY ? parseAuthKey(env.WHATSAPP_AUTH_KEY) : null,
-    countryCode: env.WHATSAPP_COUNTRY_CODE,
-    history: env.WHATSAPP_HISTORY,
-    voiceNoteDays: env.WHATSAPP_VOICE_DAYS,
-    logLevel: env.WHATSAPP_LOG,
   },
   /** Null when no search provider key is set */
   prospector: (() => {
@@ -230,6 +216,8 @@ export const config = {
   media: {
     storage: env.MEDIA_STORAGE,
     directory: resolve(env.MEDIA_DIR),
+    /** Whether recordings in a local folder survive a deploy (MEDIA_PERSISTENT_DISK=on) */
+    persistentDisk: env.MEDIA_PERSISTENT_DISK === 'on',
     maxUploadMb: env.MAX_UPLOAD_MB,
     s3: {
       bucket: env.S3_BUCKET ?? '',

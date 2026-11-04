@@ -132,7 +132,7 @@ function DealTermsEditor({ lead }: { lead: Lead }) {
           </div>
         </dl>
         <p hidden={filled} className="text-[13px] text-fg-muted">
-          הסכומים נכנסים להכנסות שבראש המשפך.
+          הסכומים נכנסים להכנסות ולריטיינרים בעמוד הבית.
         </p>
       </div>
     </div>

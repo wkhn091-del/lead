@@ -34,11 +34,14 @@ import { useUi, type ProfileTab } from '../../store/ui';
 import type { Currency } from '../../types';
 import { AnimatedNumber } from '../ui/AnimatedNumber';
 import { Button } from '../ui/Button';
+import { HomeStatsRow } from './HomeStats';
 import { useDashboardData } from './useDashboardData';
 
 /**
- * The dashboard: the money expected in the next 30 days, what needs doing (reminders worked out from the
- * timelines, the deal analyses and the Daily 10), and the open deals in the order to work them.
+ * The home screen: the headline numbers (leads, new today, closed deals, revenue and retainers), the money
+ * expected in the next 30 days, what needs doing (reminders worked out from the timelines, the deal analyses and
+ * the Daily 10), and the open deals in the order to work them. All of it is worked out from the stores, so a call
+ * logged, a status changed or a note added shows here at once.
  */
 export function DashboardView() {
   const load = useDashboard((s) => s.load);
@@ -58,6 +61,7 @@ export function DashboardView() {
 
   return (
     <div className="flex flex-col gap-6 sm:gap-8">
+      <HomeStatsRow />
       <MoneyPanel forecast={forecast} />
       <div className="grid gap-6 sm:gap-8 lg:grid-cols-[minmax(0,1.12fr)_minmax(0,1fr)] lg:items-start">
         <RemindersPanel reminders={reminders} now={now} state={loaded ? 'ready' : status === 'error' ? 'error' : 'loading'} error={error} onRetry={() => void load()} />
@@ -112,14 +116,14 @@ function MoneyPanel({ forecast: f }: { forecast: Forecast }) {
         ? `דמי הקמה ${fromCount(f.pipelineDeals, NOUNS.openDeal)}${f.unpriced ? `, בלי ${f.unpriced === 1 ? 'אחת' : f.unpriced} שעוד אין לה הערכה` : ''}`
         : f.unpriced
           ? `${count(f.unpriced, NOUNS.openDeal)} בלי הערכת שווי עדיין`
-          : 'אין עסקאות בשלב פגישת זום',
+          : 'אין עסקאות בשלב הצעת מחיר',
     },
   ];
   const others = (Object.entries(f.others) as [Currency, number][]).filter(([, value]) => value > 0);
   const oddsLine =
     f.oddsBasis === 'history'
-      ? `ואחרת לפי שיעור הסגירה שלך אחרי זום, ${formatPercent(f.baseOdds)}${f.decided < FEW_DECIDED ? ' (בזהירות, כל עוד הוכרעו מעט עסקאות)' : ''}`
-      : `ואחרת ${formatPercent(f.baseOdds)}, עד שתוכרע עסקה ראשונה אחרי זום`;
+      ? `ואחרת לפי שיעור הסגירה שלך אחרי הצעת מחיר, ${formatPercent(f.baseOdds)}${f.decided < FEW_DECIDED ? ' (בזהירות, כל עוד הוכרעו מעט עסקאות)' : ''}`
+      : `ואחרת ${formatPercent(f.baseOdds)}, עד שתוכרע עסקה ראשונה אחרי הצעת מחיר`;
 
   return (
     <section aria-labelledby="money-heading" className="glass rounded-[28px] px-5 py-6 sm:px-8 sm:py-8">
@@ -162,25 +166,14 @@ function MoneyPanel({ forecast: f }: { forecast: Forecast }) {
         ))}
       </dl>
 
-      <dl className="mt-6 grid grid-cols-2 gap-y-5 border-t border-line pt-5 sm:mt-7 sm:pt-6 md:grid-cols-3">
-        <Stat
-          label="ריטיינרים פעילים (MRR)"
-          value={formatMoney(f.retainers, f.currency)}
-          per="לחודש"
-          caption={f.retainers ? `${formatMoney(f.retainers * 12, f.currency)} בשנה` : 'עוד אין הכנסה חודשית קבועה'}
-          className="pe-4"
-        />
-        <Stat
-          label="נסגר החודש"
-          value={formatMoney(f.closedThisMonth.setup, f.currency)}
-          caption={closedCaption(f.closedThisMonth)}
-          className="border-s border-line ps-4 md:px-6"
-        />
+      {/* The retainers (MRR) are in the headline numbers above, and in the first segment here */}
+      <dl className="mt-6 grid grid-cols-2 gap-y-5 border-t border-line pt-5 sm:mt-7 sm:pt-6">
+        <Stat label="נסגר החודש" value={formatMoney(f.closedThisMonth.setup, f.currency)} caption={closedCaption(f.closedThisMonth)} className="pe-4" />
         <Stat
           label="שווי העסקאות הפתוחות"
           value={formatMoney(f.pipelineValue, f.currency)}
           caption={f.pipelineDeals ? 'בשנה הראשונה, אם כולן ייסגרו' : 'אין עסקאות פתוחות עם הערכת שווי'}
-          className="col-span-2 max-md:border-t max-md:border-line max-md:pt-5 md:col-span-1 md:border-s md:border-line md:ps-6"
+          className="border-s border-line ps-4 md:ps-6"
         />
       </dl>
 
@@ -389,10 +382,10 @@ function OpenDealsPanel({ deals, now }: { deals: OpenDeal[]; now: number }) {
           <Sparkles className="size-4 self-center text-[var(--st-zoom)]" aria-hidden />
           עסקאות פתוחות
         </h2>
-        {deals.length > 0 && <p className="text-[12.5px] text-fg-muted">{count(deals.length, NOUNS.openDeal)} בשלב פגישת זום</p>}
+        {deals.length > 0 && <p className="text-[12.5px] text-fg-muted">{count(deals.length, NOUNS.openDeal)} בשלב הצעת מחיר</p>}
       </div>
       {deals.length === 0 ? (
-        <p className="py-5 text-[14px] text-pretty text-fg-muted">אין עסקאות בשלב פגישת זום. כשליד קובע זום, הוא מופיע כאן, עם הערכת שווי והצעד הבא.</p>
+        <p className="py-5 text-[14px] text-pretty text-fg-muted">אין עסקאות בשלב הצעת מחיר. כשליד מבקש הצעת מחיר, הוא מופיע כאן, עם הערכת שווי והצעד הבא.</p>
       ) : (
         <ul className="mt-2 divide-y divide-line">
           {deals.map((deal) => (

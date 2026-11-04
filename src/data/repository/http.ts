@@ -17,7 +17,6 @@ import type {
   ProspectSearchResults,
   TrainingDeck,
   TrainingNiche,
-  WhatsAppStatus,
 } from '../../types';
 import type { BulkCreateResult, JsonImportResult, LeadRepository } from './types';
 
@@ -66,7 +65,7 @@ export async function readErrorMessage(response: Response): Promise<string> {
  *   GET    /leads                       → Lead[]
  *   POST   /leads                       NewLead → Lead   (its notes become timeline notes)
  *   POST   /leads/bulk                  { leads: NewLead[] } → { created: Lead[], skippedIds: string[] }  (max 500)
- *   POST   /leads/import-json           [{ name, phone, source?, niche?, notes? }] → 201 { created: Lead[], skipped, ignoredFields }
+ *   POST   /leads/import-json           [{ name, phone, … }] or { data: [ … ] }, any usual field names → 201 { created: Lead[], skipped, ignoredFields }
  *                                       (max 1000; numbers already on a lead or repeated in the paste are skipped)
  *   POST   /leads/bulk-delete          { ids: string[] } → 204   (max 500, with timelines and recordings)
  *   PATCH  /leads/:id                   LeadPatch → Lead   (deal amounts and currency only on a closed deal; amounts merge)
@@ -86,12 +85,6 @@ export async function readErrorMessage(response: Response): Promise<string> {
  *   GET    /features                    → Features
  *   GET    /daily                       → DailyQueue
  *   GET    /dashboard                   → { pulses }   (last touch and deal-analysis gist per lead in play)
- *   GET    /whatsapp                    → WhatsAppStatus   (the read-only link and its guard)
- *   POST   /whatsapp/link               { phone? } → WhatsAppStatus   (QR code, or a pairing code for phone)
- *   POST   /whatsapp/reconnect          → WhatsAppStatus
- *   POST   /whatsapp/unlink             → WhatsAppStatus & { removedFromPhone }
- *   POST   /leads/:id/whatsapp/history  → 202 { requested, message }   (409 with the reason when it can't)
- *   POST   /leads/:id/whatsapp/voice/:messageId → 202
  *   GET    /training                    → { run, cards }
  *   POST   /training/generate           { language } → { run, cards }   (503 when no AI is set up)
  *   POST   /training/cards/:id/review   { grade: 1-4, at? } → ObjectionCard   (the same answer and time count once)
@@ -178,7 +171,11 @@ export function createHttpRepository(baseUrl: string): LeadRepository {
     list: () => request<Lead[]>('/leads'),
     create: (lead) => request<Lead>('/leads', json('POST', lead)),
     createMany: (leads) => request<BulkCreateResult>('/leads/bulk', json('POST', { leads })),
-    importJson: (items) => request<JsonImportResult>('/leads/import-json', json('POST', items)),
+    importJson: (items, mapping = {}) => {
+      // The keys chosen by hand, in the address: ?name=title&phone=mobile
+      const chosen = new URLSearchParams(Object.entries(mapping).filter((entry): entry is [string, string] => Boolean(entry[1]))).toString();
+      return request<JsonImportResult>(`/leads/import-json${chosen ? `?${chosen}` : ''}`, json('POST', items));
+    },
     removeMany: (ids) => request<void>('/leads/bulk-delete', { ...json('POST', { ids }), keepalive: true }),
     update: (id, patch: LeadPatch) => request<Lead>(leadPath(id), json('PATCH', patch)),
     act: (id, action, details = {}) => request<Lead>(`${leadPath(id)}/actions`, json('POST', { ...action, ...details })),
@@ -213,22 +210,6 @@ export function createHttpRepository(baseUrl: string): LeadRepository {
     removeMedia: (media) => request<void>(`/media/${encodeURIComponent(media.id)}`, { method: 'DELETE' }),
     coach: (leadId, language) => request<CoachingReport>(`${leadPath(leadId)}/coaching`, json('POST', { language })),
     features: () => request<Features>('/features'),
-
-    whatsappStatus: () => request<WhatsAppStatus>('/whatsapp'),
-    linkWhatsApp: (phone) => request<WhatsAppStatus>('/whatsapp/link', json('POST', phone ? { phone } : {})),
-    reconnectWhatsApp: () => request<WhatsAppStatus>('/whatsapp/reconnect', { method: 'POST' }),
-    unlinkWhatsApp: () => request<WhatsAppStatus & { removedFromPhone?: boolean }>('/whatsapp/unlink', { method: 'POST' }),
-    fetchWhatsAppHistory: async (leadId) => {
-      try {
-        return await request<{ requested: boolean; message: string }>(`${leadPath(leadId)}/whatsapp/history`, { method: 'POST' });
-      } catch (error) {
-        // 409 carries the reason it couldn't ask (no chat yet, not connected…)
-        if (error instanceof ApiError && error.status === 409) return { requested: false, message: error.message };
-        throw error;
-      }
-    },
-    fetchVoiceNote: (leadId, messageId) =>
-      request<void>(`${leadPath(leadId)}/whatsapp/voice/${encodeURIComponent(messageId)}`, { method: 'POST' }),
 
     trainingDeck: () => request<TrainingDeck>('/training'),
     generateDeck: (language) => request<TrainingDeck>('/training/generate', json('POST', { language })),

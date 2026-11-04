@@ -1,4 +1,4 @@
-import { internationalDigits } from '../whatsapp/phone.js';
+import { internationalDigits } from '../lib/phone.js';
 import type { DiscoveredPlace, DiscoveryProvider } from './types.js';
 
 /**

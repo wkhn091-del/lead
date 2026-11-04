@@ -119,6 +119,7 @@ const ACTIVITY_TYPE: Record<LeadAction['type'], Activity['type']> = {
   no_answer: 'no_answer',
   answered: 'answered',
   archive: 'archived',
+  whatsapp: 'whatsapp',
 };
 
 /**

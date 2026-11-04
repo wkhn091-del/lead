@@ -19,9 +19,10 @@ export default defineConfig({
     proxy: { '/api': 'http://localhost:4000' },
   },
   build: {
-    // React, Motion, Radix, cmdk and the app ship as one ~250 kB (gzipped) bundle, which is fine for a dashboard
-    // used on one desk. One file also keeps the single-page preview build simple.
-    chunkSizeWarningLimit: 900,
+    // React, Motion, Radix, cmdk, TanStack Table and the app ship as one ~300 kB (gzipped) bundle, which is fine for
+    // a CRM used on one desk and cached after the first visit. One file also means no chunk can go missing after a
+    // deploy while the app is open.
+    chunkSizeWarningLimit: 1100,
   },
   test: {
     // server/ has its own tests and config.

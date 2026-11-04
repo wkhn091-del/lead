@@ -22,7 +22,7 @@ import { finalScore, ruleScore, type SiteAssessment } from '../src/prospector/sc
 import { extractSignals, parsePage } from '../src/prospector/signals.js';
 import { cleanWebsite, domainOf, notAWebsite, responseVerdict } from '../src/prospector/site.js';
 import { emptyAnalysis, type DiscoveredPlace, type DiscoveryProvider, type ProspectProviderName, type ProspectRecord, type ProspectSearchRecord } from '../src/prospector/types.js';
-import { createMemoryStores } from '../src/stores/memory.js';
+import { createMemoryStores } from './memory-stores.js';
 import type { Stores } from '../src/stores/types.js';
 import {
   CHALLENGE_PAGE,

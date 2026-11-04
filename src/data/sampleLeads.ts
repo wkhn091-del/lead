@@ -18,7 +18,7 @@ interface ChatScript {
 
 /** Something that happened with a lead: a pipeline step, a note or message, or a WhatsApp chat mirrored by the server */
 type Event =
-  | { step: 'no_answer' | 'answered' | 'advance' | 'archive'; days: number; hour?: number; said?: string; channel?: Channel }
+  | { step: 'no_answer' | 'answered' | 'advance' | 'archive' | 'whatsapp'; days: number; hour?: number; said?: string; channel?: Channel }
   | { write: MessageKind; days: number; hour?: number; said: string }
   | { chat: ChatScript[]; days: number; hour?: number; minute?: number };
 
@@ -104,7 +104,20 @@ const SEEDS: Seed[] = [
       },
     ],
   },
-  { key: 'galil-bakery', name: 'מאפיית הגליל', contact: 'אמיר', phone: '054-000-0124', campaign: 'יצרני מזון', method: 'whatsapp', age: 16, story: [{ step: 'no_answer', days: 8 }], approach: 'רוצים הזמנות מראש לשבת. לפתוח בזה.' },
+  {
+    key: 'galil-bakery',
+    name: 'מאפיית הגליל',
+    contact: 'אמיר',
+    phone: '054-000-0124',
+    campaign: 'יצרני מזון',
+    method: 'whatsapp',
+    age: 16,
+    story: [
+      { step: 'no_answer', days: 8 },
+      { step: 'whatsapp', days: 8, hour: 14, said: 'לא ענה, אז שלחתי הודעה קצרה: מי אני, ודוגמה של עמוד הזמנות לשבת שבניתי למאפייה אחרת.' },
+    ],
+    approach: 'רוצים הזמנות מראש לשבת. לפתוח בזה.',
+  },
   { key: 'migdal-coffee', name: 'בית הקלייה מגדל', contact: 'גיל אוחנה', phone: '052-000-0110', website: 'migdal-coffee.example', campaign: 'יצרני מזון', age: 16, approach: 'ראה אתר שבנינו. לשאול מה אהב בו.' },
   {
     key: 'levi-family-dairy', name: 'מחלבת משפחת לוי', contact: 'יוסי לוי', phone: '053-000-0244', campaign: 'יצרני מזון', age: 16,
@@ -225,13 +238,13 @@ export function createSampleData(now = Date.now()): SampleData {
         interactions.push({ id: `${id}-entry-${i}`, leadId: id, kind: event.write, outcome: null, body: event.said, step: null, stage, stageTo: null, at, updatedAt: at });
         return;
       }
-      const type = ({ no_answer: 'no_answer', answered: 'answered', advance: 'advanced', archive: 'archived' } as const)[event.step];
+      const type = ({ no_answer: 'no_answer', answered: 'answered', advance: 'advanced', archive: 'archived', whatsapp: 'whatsapp' } as const)[event.step];
       const to = type === 'advanced' ? NEXT[stage] : null;
       const step: Activity = { id: `${id}-step-${i}`, type, at, from: stage, to, before: { stageChangedAt, lastAttemptAt, attemptCount } };
       steps.unshift(step);
       interactions.push(timelineEntryFor(step, id, event.said, event.channel));
       if (type === 'no_answer') attemptCount += 1;
-      if (type === 'no_answer' || type === 'answered') lastAttemptAt = at;
+      if (type === 'no_answer' || type === 'answered' || type === 'whatsapp') lastAttemptAt = at;
       if (type === 'archived') archivedAt = at;
       if (to) {
         stage = to;

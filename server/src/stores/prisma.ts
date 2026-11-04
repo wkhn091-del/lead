@@ -22,8 +22,6 @@ import {
   type ObjectionCardRecord,
   type Stores,
   type TrainingStore,
-  type WhatsAppChatRecord,
-  type WhatsAppStore,
 } from './types.js';
 import type { ProspectAnalysis, ProspectorStore, ProspectRecord, ProspectSearchRecord, SiteSignals } from '../prospector/types.js';
 import { sameWording, wordingOf } from '../training/starter.js';
@@ -297,39 +295,6 @@ export function createPrismaStores(prisma: PrismaClient): Stores {
     async removeForLeads(leadIds) {
       await prisma.interaction.deleteMany({ where: { leadId: { in: leadIds } } });
     },
-    async writeChat(leadId, id, change) {
-      for (let attempt = 0; attempt < 6; attempt++) {
-        const row = await prisma.interaction.findFirst({ where: { id, leadId } });
-        const current = row ? toInteraction(row) : null;
-        const next = change(current);
-        if (!next) return current;
-        const chat = next.chat.map(toChatLine);
-        if (!row) {
-          try {
-            const data = { ...interactionData(next.create), source: 'whatsapp' as const, chat, body: next.body, at: next.at };
-            return toInteraction(await prisma.interaction.create({ data }));
-          } catch (error) {
-            // Created by another write in the meantime: read it and apply the change on top
-            if (errorCode(error) === 'P2002') continue;
-            throw error;
-          }
-        }
-        const { count } = await prisma.interaction.updateMany({
-          where: { id, leadId, updatedAt: row.updatedAt },
-          data: { chat: { set: chat }, body: next.body, at: next.at },
-        });
-        if (count === 1) return toInteraction(await prisma.interaction.findUniqueOrThrow({ where: { id } }));
-      }
-      throw new ConflictError('השיחה המשיכה להשתנות, אז לא הצלחנו לשמור אותה. היא תישמר עם ההודעה הבאה.');
-    },
-    async findChatEntry(leadId, messageId) {
-      const row = await prisma.interaction.findFirst({ where: { leadId, chat: { some: { id: messageId } } } });
-      return row ? toInteraction(row) : null;
-    },
-    async oldestChat(leadId) {
-      const row = await prisma.interaction.findFirst({ where: { leadId, source: 'whatsapp' }, orderBy: { at: 'asc' } });
-      return row ? toInteraction(row) : null;
-    },
     async latestByLead(leadIds) {
       const found = new Map<string, LatestEntries>();
       for (const batch of chunks(leadIds)) {
@@ -434,67 +399,6 @@ export function createPrismaStores(prisma: PrismaClient): Stores {
         data: { leadIds: { set: leadIds }, version: { increment: 1 } },
       });
       return count === 1;
-    },
-  };
-
-  const toChat = (row: Prisma.WhatsAppChatGetPayload<object>): WhatsAppChatRecord => ({
-    jid: row.id,
-    phone: row.phone ?? null,
-    lastId: row.lastId,
-    lastFromMe: row.lastFromMe,
-    lastAt: row.lastAt,
-  });
-
-  const whatsapp: WhatsAppStore = {
-    async saveChats(chats) {
-      const newest = new Map<string, WhatsAppChatRecord>();
-      for (const chat of chats) {
-        const seen = newest.get(chat.jid);
-        if (!seen || seen.lastAt < chat.lastAt) newest.set(chat.jid, { ...chat, phone: chat.phone ?? seen?.phone ?? null });
-      }
-      for (const batch of chunks([...newest.values()])) {
-        const rows = await prisma.whatsAppChat.findMany({ where: { id: { in: batch.map((chat) => chat.jid) } } });
-        const known = new Map(rows.map((row) => [row.id, row]));
-        for (const chat of batch) {
-          const row = known.get(chat.jid);
-          const data = { phone: chat.phone, lastId: chat.lastId, lastFromMe: chat.lastFromMe, lastAt: chat.lastAt };
-          if (!row) {
-            await prisma.whatsAppChat.upsert({ where: { id: chat.jid }, create: { id: chat.jid, ...data }, update: {} });
-          } else if (row.lastAt < chat.lastAt) {
-            await prisma.whatsAppChat.update({ where: { id: chat.jid }, data: { ...data, phone: chat.phone ?? row.phone } });
-          } else if (chat.phone && !row.phone) {
-            await prisma.whatsAppChat.update({ where: { id: chat.jid }, data: { phone: chat.phone } });
-          }
-        }
-      }
-    },
-    async findChatsByPhone(phones) {
-      if (!phones.length) return [];
-      const rows = await prisma.whatsAppChat.findMany({ where: { phone: { in: phones } }, orderBy: { lastAt: 'desc' } });
-      return rows.map(toChat);
-    },
-    async readAuth(ids) {
-      const values = new Map<string, string>();
-      for (const batch of chunks(ids)) {
-        const rows = await prisma.whatsAppAuth.findMany({ where: { id: { in: batch } } });
-        for (const row of rows) values.set(row.id, row.value);
-      }
-      return values;
-    },
-    async writeAuth(entries) {
-      // One write per key: a failure leaves every other key as it was.
-      for (const batch of chunks(entries, 50)) {
-        await Promise.all(
-          batch.map(({ id, value }) =>
-            value === null
-              ? prisma.whatsAppAuth.deleteMany({ where: { id } })
-              : prisma.whatsAppAuth.upsert({ where: { id }, create: { id, value }, update: { value } }),
-          ),
-        );
-      }
-    },
-    async clearAuth() {
-      await prisma.whatsAppAuth.deleteMany({});
     },
   };
 
@@ -737,5 +641,5 @@ export function createPrismaStores(prisma: PrismaClient): Stores {
     },
   };
 
-  return { leads, interactions, media, coaching, daily, whatsapp, training, prospector };
+  return { leads, interactions, media, coaching, daily, training, prospector };
 }

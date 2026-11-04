@@ -25,7 +25,7 @@ describe('the timeline', () => {
       'ניסיון 3: ענה',
       'הודעת וואטסאפ',
       'פגישת זום: הליד לא הגיע',
-      'ניסיון 2: ענה ← פגישת זום',
+      'ניסיון 2: ענה ← הצעת מחיר',
       'ניסיון 1: אין מענה',
     ]);
     // The sample analysis quotes these entries by name.
@@ -157,7 +157,7 @@ describe('leads kept in this browser', () => {
     await repository.act(lead.id, { id: 'c2', type: 'advance', from: 'cold_call' }, { body: 'Wants Shabbat pre-orders.' });
     let profile = await repository.timeline(lead.id);
     expect(describeTimeline(profile.interactions).map((item) => item.title)).toEqual([
-      'ניסיון 2: ענה ← פגישת זום',
+      'ניסיון 2: ענה ← הצעת מחיר',
       'ניסיון 1: אין מענה',
       'הערה',
     ]);

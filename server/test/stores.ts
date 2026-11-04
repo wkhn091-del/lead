@@ -1,4 +1,4 @@
-import { createMemoryStores } from '../src/stores/memory.js';
+import { createMemoryStores } from './memory-stores.js';
 import type { Stores } from '../src/stores/types.js';
 
 /** The test database is emptied before each run, so its name must end in _test. */
@@ -36,8 +36,6 @@ export async function createTestStores(): Promise<TestStores> {
   await prisma.coachingReport.deleteMany();
   await prisma.lead.deleteMany();
   await prisma.dailyQueue.deleteMany();
-  await prisma.whatsAppChat.deleteMany();
-  await prisma.whatsAppAuth.deleteMany();
   await prisma.objectionCard.deleteMany();
   await prisma.objectionVariant.deleteMany();
   await prisma.trainingRun.deleteMany();

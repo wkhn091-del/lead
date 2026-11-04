@@ -59,7 +59,7 @@ export function ImportBar() {
           <div className="glass-strong pointer-events-auto flex w-full max-w-[600px] items-center gap-3 rounded-2xl py-2.5 ps-4 pe-2.5">
             <div className="min-w-0 flex-1">
               <p className="text-[14px] font-semibold">{picked === 1 ? 'עסק אחד נבחר' : `${count(picked, NOUNS.business)} נבחרו`}</p>
-              <p className="truncate text-[12.5px] text-fg-muted">ייכנסו למאגר העשירייה היומית, בשלב שיחה קרה</p>
+              <p className="truncate text-[12.5px] text-fg-muted">ייכנסו בסטטוס חדש, ולמאגר העשירייה היומית</p>
             </div>
             <Button size="sm" variant="ghost" onClick={clearSelection} aria-label="ניקוי הבחירה" className="max-sm:px-2">
               <X className="size-4" aria-hidden />

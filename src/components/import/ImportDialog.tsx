@@ -22,7 +22,9 @@ const DRAFT_KEY = 'import-paste';
 const JSON_DRAFT_KEY = 'import-json';
 /** The kind of paste the dialog opens on: the last one used */
 const MODE_KEY = 'import-mode';
-const keep = (key: string, text: string) => (text.trim() ? drafts.write(key, text) : drafts.clear(key));
+/** Above this a paste isn't kept as a draft: a whole file would crowd out what the app keeps on this device */
+const DRAFT_LIMIT = 500_000;
+const keep = (key: string, text: string) => (text.trim() && text.length <= DRAFT_LIMIT ? drafts.write(key, text) : drafts.clear(key));
 
 type Mode = 'table' | 'json';
 const MODE_OPTIONS: readonly SegmentedOption<Mode>[] = [

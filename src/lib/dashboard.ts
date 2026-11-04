@@ -308,6 +308,84 @@ export function forecast(leads: readonly Lead[], deals: readonly OpenDeal[], now
   };
 }
 
+/** The home screen's headline numbers: worked out from the leads alone, so they move the moment a lead does */
+export interface HomeStats {
+  /** Every lead, and how many of them are still in play or were marked not relevant */
+  total: number;
+  active: number;
+  archived: number;
+  /** Added since midnight, yesterday, and in the 7 days with today */
+  newToday: number;
+  newYesterday: number;
+  newThisWeek: number;
+  /** Closed deals (clients), those closed this month, and the leads waiting on a quote */
+  closed: number;
+  closedThisMonth: number;
+  quotes: number;
+  currency: Currency;
+  /** Setup fees of the closed deals, and how many have amounts */
+  revenue: number;
+  pricedDeals: number;
+  /** Monthly retainers of the closed deals (MRR), and the clients paying one */
+  mrr: number;
+  retainerClients: number;
+  /** The same amounts in deals made in another currency, never added to the main ones */
+  others: Partial<Record<Currency, { revenue: number; mrr: number }>>;
+}
+
+export function homeStats(leads: readonly Lead[], now: number, currency: Currency = appConfig.baseCurrency): HomeStats {
+  const today = startOfDay(now);
+  const yesterday = addDays(now, -1);
+  const weekStart = addDays(now, -6);
+  const monthStart = new Date(new Date(now).getFullYear(), new Date(now).getMonth(), 1).getTime();
+  const stats: HomeStats = {
+    total: leads.length,
+    active: 0,
+    archived: 0,
+    newToday: 0,
+    newYesterday: 0,
+    newThisWeek: 0,
+    closed: 0,
+    closedThisMonth: 0,
+    quotes: 0,
+    currency,
+    revenue: 0,
+    pricedDeals: 0,
+    mrr: 0,
+    retainerClients: 0,
+    others: {},
+  };
+  for (const lead of leads) {
+    const added = Date.parse(lead.createdAt);
+    if (added >= today) stats.newToday += 1;
+    else if (added >= yesterday) stats.newYesterday += 1;
+    if (added >= weekStart) stats.newThisWeek += 1;
+    if (lead.archivedAt) {
+      stats.archived += 1;
+      continue;
+    }
+    stats.active += 1;
+    if (lead.stage === 'zoom') stats.quotes += 1;
+    if (lead.stage !== 'closed') continue;
+    stats.closed += 1;
+    if (closedAt(lead) >= monthStart && closedAt(lead) <= now) stats.closedThisMonth += 1;
+    const { setupFee, monthlyRetainer } = lead.deal;
+    if (lead.currency !== currency) {
+      const other = (stats.others[lead.currency] ??= { revenue: 0, mrr: 0 });
+      other.revenue += setupFee;
+      other.mrr += monthlyRetainer;
+      continue;
+    }
+    stats.revenue += setupFee;
+    if (hasDealTerms(lead.deal)) stats.pricedDeals += 1;
+    if (monthlyRetainer > 0) {
+      stats.mrr += monthlyRetainer;
+      stats.retainerClients += 1;
+    }
+  }
+  return stats;
+}
+
 export type ReminderKind =
   | 'follow-up'
   | 'no-show'
@@ -432,7 +510,7 @@ export function reminders(leads: readonly Lead[], pulses: ReadonlyMap<string, Le
         kind: 'stale-zoom',
         urgency: idle >= 7 ? 'now' : 'soon',
         label: 'עסקה מתקררת',
-        detail: `${count(idle, NOUNS.day)} בלי מגע בשלב פגישת זום. כדאי לחזור אליו לפני שהעניין יורד.`,
+        detail: `${count(idle, NOUNS.day)} בלי מגע בשלב הצעת מחיר. כדאי לחזור אליו לפני שהעניין יורד.`,
         due: null,
       });
       continue;
@@ -447,7 +525,7 @@ export function reminders(leads: readonly Lead[], pulses: ReadonlyMap<string, Le
           kind: 'answered',
           urgency: 'soon',
           label: 'שיחה שלא נסגרה',
-          detail: `דיברתם לפני ${count(idle, NOUNS.day)} ולא נקבע זום. הוא כבר לא עולה בהגרלה היומית, אז כדאי לחזור אליו.`,
+          detail: `דיברתם לפני ${count(idle, NOUNS.day)} ועוד לא ביקש הצעת מחיר. הוא כבר לא עולה בהגרלה היומית, אז כדאי לחזור אליו.`,
           due: null,
         });
         continue;

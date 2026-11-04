@@ -1,5 +1,5 @@
 import { motion } from 'motion/react';
-import { CalendarCheck, GraduationCap, LayoutDashboard, Radar, SquareKanban } from 'lucide-react';
+import { CalendarCheck, GraduationCap, House, Radar, SquareKanban } from 'lucide-react';
 import { useId, useMemo } from 'react';
 import { cn } from '../lib/cn';
 import { SPRING } from '../lib/motion';
@@ -40,16 +40,16 @@ export function useViewTabs(): ViewTab[] {
   }, [daily, leads]);
 
   return [
-    { value: 'dashboard', label: 'לוח', title: 'לוח בקרה: כסף צפוי, תזכורות ועסקאות פתוחות', icon: LayoutDashboard, badge: urgent ? String(urgent) : null },
+    { value: 'dashboard', label: 'בית', title: 'המספרים: לידים, חדשים היום, עסקאות, הכנסות וריטיינרים; כסף צפוי, תזכורות ועסקאות פתוחות', icon: House, badge: urgent ? String(urgent) : null },
+    { value: 'pipeline', label: 'לידים', title: 'טבלת הלידים: חיפוש, סינון, מיון וייצוא לאקסל; או עמודה לכל סטטוס', icon: SquareKanban },
     { value: 'today', label: 'היום', title: 'העשירייה היומית', icon: CalendarCheck, badge: progress },
-    { value: 'pipeline', label: 'משפך', title: 'משפך המכירות', icon: SquareKanban },
     { value: 'prospector', label: 'מאתר', title: 'מאתר הלידים', icon: Radar, busy: searching },
     { value: 'training', label: 'אימון', title: 'אימון התנגדויות', icon: GraduationCap, badge: due ? String(due) : null },
   ];
 }
 
 /**
- * Switches between the dashboard, today's calls, the whole pipeline, finding new leads and objection practice.
+ * Switches between the home screen, the leads, today's calls, finding new leads and objection practice.
  * In the header the tabs take the width their words need (`fit`); in the row under it on tablets they share the
  * full width. Phones get the bar at the bottom of the screen instead (TabBar).
  */

@@ -63,24 +63,25 @@ describe('palette search', () => {
 });
 
 describe('palette lead actions', () => {
-  const codes = (target: Lead, whatsapp = false, now?: number) => leadCommands(target, { whatsapp, now }).map((item) => item.code);
+  const codes = (target: Lead, now?: number) => leadCommands(target, { now }).map((item) => item.code);
 
   it('offers the four call outcomes with one key each, then the lead’s own actions', () => {
-    const items = leadCommands(leads[0], { whatsapp: false });
+    const items = leadCommands(leads[0]);
     expect(items.slice(0, 4).map((item) => [item.key, item.label])).toEqual([
       ['N', 'אין מענה'],
-      ['A', 'ענה, בלי זום עדיין'],
-      ['Z', 'נקבע זום'],
+      ['A', 'ענה, עוד בלי הצעה'],
+      ['Z', 'הצעת מחיר'],
       ['X', 'לא רלוונטי'],
     ]);
-    expect(codes(leads[0])).toEqual(['KeyN', 'KeyA', 'KeyZ', 'KeyX', 'KeyO', 'KeyW', 'KeyP', 'KeyC']);
+    // S sends a WhatsApp: the lead has a number
+    expect(codes(leads[0])).toEqual(['KeyN', 'KeyA', 'KeyZ', 'KeyX', 'KeyS', 'KeyO', 'KeyW', 'KeyP', 'KeyC']);
     // Every key is different, so one press can't mean two things
-    expect(new Set(codes(leads[0], true)).size).toBe(codes(leads[0], true).length);
+    expect(new Set(codes(leads[0])).size).toBe(codes(leads[0]).length);
   });
 
-  it('speaks the Zoom stage’s language', () => {
-    const atZoom = leadCommands({ ...leads[0], stage: 'zoom' }, { whatsapp: false });
-    expect(atZoom.slice(0, 3).map((item) => item.label)).toEqual(['לא הגיע', 'דיברנו, עוד לא נסגר', 'העסקה נסגרה']);
+  it('speaks the quote stage’s language', () => {
+    const atQuote = leadCommands({ ...leads[0], stage: 'zoom' });
+    expect(atQuote.slice(0, 3).map((item) => item.label)).toEqual(['אין מענה', 'דיברנו, עוד לא נסגר', 'העסקה נסגרה']);
   });
 
   it('logs nothing on closed or archived leads, and offers Undo only inside its window', () => {
@@ -95,14 +96,14 @@ describe('palette lead actions', () => {
       before: { stageChangedAt: '2026-10-01T08:00:00.000Z', lastAttemptAt: null, attemptCount: 0 },
     };
     const called = { ...leads[0], activity: [step] };
-    expect(codes(called, false, Date.parse('2026-10-22T08:05:00.000Z'))).toContain('KeyU');
-    expect(codes(called, false, Date.parse('2026-10-22T08:15:00.000Z'))).not.toContain('KeyU');
-    expect(leadCommands(called, { whatsapp: true, now: Date.parse('2026-10-22T08:05:00.000Z') }).find((item) => item.code === 'KeyU')?.label).toBe('ביטול "אין מענה"');
+    expect(codes(called, Date.parse('2026-10-22T08:05:00.000Z'))).toContain('KeyU');
+    expect(codes(called, Date.parse('2026-10-22T08:15:00.000Z'))).not.toContain('KeyU');
+    expect(leadCommands(called, { now: Date.parse('2026-10-22T08:05:00.000Z') }).find((item) => item.code === 'KeyU')?.label).toBe('ביטול "אין מענה"');
   });
 
-  it('offers to pull WhatsApp history only when WhatsApp is linked and the lead has a number', () => {
-    expect(codes(leads[0], true)).toContain('KeyH');
-    expect(codes(leads[3], true)).not.toContain('KeyH');
+  it('offers WhatsApp, with the ready message, only to a lead with a number', () => {
+    expect(codes(leads[0])).toContain('KeyS');
+    expect(codes(leads[3])).not.toContain('KeyS');
   });
 });
 
