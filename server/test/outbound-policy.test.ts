@@ -1,11 +1,12 @@
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 /**
- * The CRM is an internal tool: it never sends an email, a WhatsApp message, an SMS or a link to a lead.
- * These checks read the server's source, so a change that adds a way out fails the tests before it ships.
- * At run time, the WhatsApp link is held to the same rule by src/whatsapp/guard.ts.
+ * The server never sends an email, a WhatsApp message, an SMS or a link to a lead. WhatsApp opens in the app, on
+ * your own phone or computer, with a message from your template that you check and send yourself (wa.me links,
+ * src/lib/phone.ts in the frontend). These checks read the server's source, so a change that adds a way out
+ * fails the tests before it ships.
  */
 
 const root = join(import.meta.dirname, '..');
@@ -41,6 +42,7 @@ const MESSAGING = [
   'telnyx',
   'whatsapp-web.js',
   'whatsapp-cloud-api',
+  'baileys',
   '@whiskeysockets/baileys',
   'web-push',
   'firebase-admin',
@@ -51,7 +53,7 @@ const MESSAGING = [
 
 const MESSAGING_HOSTS = /graph\.facebook\.com|api\.whatsapp\.com|wa\.me\/|api\.twilio\.com|api\.sendgrid\.com|api\.mailgun\.net|api\.resend\.com|api\.postmarkapp\.com|smtp\.|hooks\.slack\.com|api\.telegram\.org/i;
 
-/** Baileys methods that can reach a contact or change the account. Only guard.ts may name them. */
+/** WhatsApp client methods that reach a contact or change an account: none belongs in the server */
 const SEND_CALL =
   /\.(sendMessage|relayMessage|sendReceipts?|readMessages|sendPresenceUpdate|presenceSubscribe|chatModify|sendNode|sendRawMessage|rejectCall|updateBlockStatus|groupCreate|groupParticipantsUpdate|groupInviteCode|updateProfile\w*|sendPeerDataOperationMessage|addOrEditContact|addChatLabel|addMessageLabel|newsletter\w+|createCallLink|sendWAMBuffer|appPatch)\s*\(/;
 
@@ -72,10 +74,8 @@ describe('outbound policy', () => {
     expect(files.filter(({ text }) => MESSAGING_HOSTS.test(text)).map(({ path }) => path)).toEqual([]);
   });
 
-  it('calls no WhatsApp method that could send, outside the read-only guard', () => {
-    const calls = files
-      .filter(({ path }) => path !== join('src', 'whatsapp', 'guard.ts'))
-      .flatMap(({ path, text }) => text.split('\n').flatMap((line, index) => (SEND_CALL.test(line) ? [`${path}:${index + 1}: ${line.trim()}`] : [])));
+  it('calls no WhatsApp method that could send', () => {
+    const calls = files.flatMap(({ path, text }) => text.split('\n').flatMap((line, index) => (SEND_CALL.test(line) ? [`${path}:${index + 1}: ${line.trim()}`] : [])));
     expect(calls).toEqual([]);
   });
 
@@ -99,18 +99,8 @@ describe('outbound policy', () => {
     expect(proxy).toContain("req.method !== 'GET' && req.method !== 'HEAD'");
   });
 
-  it('loads Baileys only inside the WhatsApp module, behind the guard', () => {
-    const importers = files.filter(({ text }) => /from 'baileys'|import\('baileys'\)/.test(text)).map(({ path }) => path);
-    expect(importers.every((path) => path.startsWith(join('src', 'whatsapp')))).toBe(true);
-    // The guard itself, the routes and the settings never load it
-    for (const name of ['guard.ts', 'service.ts', 'auth-key.ts', 'phone.ts', 'whatsapp.routes.ts']) {
-      expect(importers).not.toContain(join('src', 'whatsapp', name));
-    }
-    // Every socket is created in one place, from the guard's settings, and armed before use
-    const creators = files.filter(({ text }) => /makeWASocket\(/.test(text)).map(({ path }) => path);
-    expect(creators).toEqual([join('src', 'whatsapp', 'link.ts')]);
-    const link = files.find(({ path }) => path === join('src', 'whatsapp', 'link.ts'))!.text;
-    expect(link).toMatch(/makeWASocket\(\{\s*\.\.\.this\.guard\.socketConfig,/);
-    expect(link).toContain('this.guard.arm(socket);');
+  it('has no WhatsApp client at all: no linked device, nothing that could send on its own', () => {
+    expect(existsSync(join(sourceDir, 'whatsapp'))).toBe(false);
+    expect(files.filter(({ text }) => /from 'baileys'|import\('baileys'\)|makeWASocket/.test(text)).map(({ path }) => path)).toEqual([]);
   });
 });

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { JSON_IMPORT_LIMIT } from './json-import.js';
+import { JSON_IMPORT_LIMIT, leadList, WEBSITE } from './json-import.js';
 import { ACTION_TYPES, STAGES } from './workflow.js';
 
 // These mirror src/types.ts in the frontend. Unknown fields are rejected.
@@ -18,8 +18,8 @@ export const Id = z
   .regex(/^[A-Za-z0-9_-]+$/, 'אפשר רק אותיות באנגלית, ספרות, - או _');
 
 const EmailFormat = z.email();
-/** A domain or an http(s) address. Anything else (javascript:, mailto:) is refused, since it becomes a link. */
-const WEBSITE = /^(https?:\/\/)?[^\s/?#:@]+\.[^\s/?#:@]{2,}(:\d{1,5})?([/?#]\S*)?$/i;
+// A website is a domain or an http(s) address (WEBSITE). Anything else (javascript:, mailto:) is refused, since it
+// becomes a link.
 
 const Timestamp = z.iso.datetime({ offset: true });
 const Name = z.string().trim().min(1, 'חובה למלא שם').max(120);
@@ -84,7 +84,7 @@ export const LeadInput = z.strictObject({
   notes: z.array(NoteInput).max(500).default([]),
   createdAt: Timestamp.optional(),
   updatedAt: Timestamp.optional(),
-  stage: z.literal('cold_call', 'לידים חדשים מתחילים בשלב שיחה קרה').optional(),
+  stage: z.literal('cold_call', 'לידים חדשים מתחילים בסטטוס חדש').optional(),
   stageChangedAt: Timestamp.optional(),
   archivedAt: z.null().optional(),
   attemptCount: z.literal(0).optional(),
@@ -166,11 +166,24 @@ export const BulkDeleteBody = z.strictObject({
   ids: z.array(Id).min(1).max(BULK_LIMIT),
 });
 
-/** Leads pasted as JSON: the array itself. Each item is read and checked on its own (json-import.ts). */
-export const JsonImportBody = z
-  .array(z.unknown(), { error: 'צריך לשלוח מערך JSON של לידים: [ { … }, { … } ].' })
-  .min(1, 'המערך ריק: אין בו לידים.')
-  .max(JSON_IMPORT_LIMIT, `אפשר לשלוח עד ${JSON_IMPORT_LIMIT} לידים בבקשה אחת.`);
+/**
+ * Leads sent as JSON: the array itself, or the list an export wraps it in ({ "data": [ … ] }). Each item is read
+ * and checked on its own (json-import.ts).
+ */
+export const JsonImportBody = z.preprocess(
+  (body) => leadList(body) ?? body,
+  z
+    .array(z.unknown(), { error: 'צריך לשלוח מערך JSON של לידים: [ { … }, { … } ].' })
+    .min(1, 'המערך ריק: אין בו לידים.')
+    .max(JSON_IMPORT_LIMIT, `אפשר לשלוח עד ${JSON_IMPORT_LIMIT} לידים בבקשה אחת.`),
+);
+
+/**
+ * The keys chosen by hand for the business name, the phone and the niche, in the address of a JSON import:
+ * ?name=title&phone=mobile&niche=category (json-import.ts, JsonMapping). Each is optional.
+ */
+const MappedKey = z.string().trim().max(200).optional();
+export const JsonMappingQuery = z.object({ name: MappedKey, phone: MappedKey, niche: MappedKey });
 
 export const LeadParams = z.object({ id: Id });
 export const ActionParams = z.object({ id: Id, actionId: Id });

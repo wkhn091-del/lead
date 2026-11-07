@@ -9,8 +9,7 @@ import {
   Copy,
   CornerDownLeft,
   GraduationCap,
-  History,
-  LayoutDashboard,
+  House,
   MessageCircle,
   Moon,
   NotebookPen,
@@ -29,14 +28,14 @@ import { cn } from '../../lib/cn';
 import { count, NOUNS } from '../../lib/hebrew';
 import { EASE_OUT } from '../../lib/motion';
 import { leadCommands, normalize, searchLeads, todaysCalls, type LeadCommand, type LeadCommandItem } from '../../lib/palette';
-import { formatPhone } from '../../lib/phone';
+import { formatPhone, whatsAppHref } from '../../lib/phone';
+import { logWhatsApp, messageFor } from '../pipeline/actions';
 import { dueCards } from '../../lib/practice';
 import { ARCHIVED_META, leadBadge, OUTCOME_META, STAGE_META, toneStyle } from '../../lib/stages';
 import { useLeadStore } from '../../store/leads';
 import { toast } from '../../store/toasts';
 import { useTraining } from '../../store/training';
 import { useUi } from '../../store/ui';
-import { useWhatsApp } from '../../store/whatsapp';
 import type { Lead } from '../../types';
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
@@ -47,12 +46,12 @@ const COMMAND_ICON: Record<LeadCommand, LucideIcon> = {
   answered: OUTCOME_META.answered.icon,
   advance: STAGE_META.zoom.icon,
   archive: ARCHIVED_META.icon,
+  whatsapp: OUTCOME_META.whatsapp.icon,
   undo: Undo2,
   open: PanelRightOpen,
   note: NotebookPen,
   coach: Sparkles,
   'copy-phone': Copy,
-  'whatsapp-history': History,
 };
 
 const COMMAND_TONE: Partial<Record<LeadCommand, string>> = {
@@ -60,18 +59,9 @@ const COMMAND_TONE: Partial<Record<LeadCommand, string>> = {
   answered: OUTCOME_META.answered.tone,
   advance: STAGE_META.zoom.tone,
   archive: ARCHIVED_META.tone,
+  whatsapp: OUTCOME_META.whatsapp.tone,
   coach: 'var(--st-zoom)',
-  'whatsapp-history': 'var(--whatsapp)',
 };
-
-const WHATSAPP_STATE = {
-  connected: 'מחובר',
-  linking: 'בקישור',
-  connecting: 'מתחבר',
-  reconnecting: 'מתחבר מחדש',
-  stopped: 'נעצר',
-  unlinked: 'לא מקושר',
-} as const;
 
 interface LastStep {
   leadId: string;
@@ -82,7 +72,7 @@ interface LastStep {
 
 /**
  * Ctrl+K (⌘K on a Mac): find any lead by name, contact, campaign or phone digits, and log a call without
- * touching the mouse. Pick a lead, then one key: N אין מענה, A ענה, Z נקבע זום (or the deal closed), X לא רלוונטי,
+ * touching the mouse. Pick a lead, then one key: N אין מענה, A ענה, Z הצעת מחיר (or the deal closed), X לא רלוונטי, S וואטסאפ,
  * U undo. Keys are physical, so they work on the Hebrew layout too. Empty, it opens on the next of today's
  * calls, and after each step it's ready for the next one.
  */
@@ -228,7 +218,6 @@ function RootPage({
 }) {
   const ui = useUi();
   const deck = useTraining((s) => s.deck);
-  const whatsapp = useWhatsApp((s) => s.status);
   const due = deck ? dueCards(deck.cards).length : 0;
   const query = search.trim();
 
@@ -244,9 +233,9 @@ function RootPage({
   const commands: { id: string; label: string; icon: LucideIcon; keywords: string; hint?: string; shortcut?: string; onSelect: () => void }[] = [
     {
       id: 'go-dashboard',
-      label: 'לוח בקרה: כסף צפוי, עסקאות ותזכורות',
-      icon: LayoutDashboard,
-      keywords: 'לוח בקרה דשבורד כסף צפוי הכנסות תחזית תזכורות מעקב עסקאות פתוחות dashboard forecast money reminders open deals',
+      label: 'בית: המספרים, כסף צפוי, עסקאות ותזכורות',
+      icon: House,
+      keywords: 'בית לוח בקרה דשבורד מספרים סטטיסטיקות סך לידים חדשים היום עסקאות שנסגרו הכנסות ריטיינרים כסף צפוי תחזית תזכורות עסקאות פתוחות home dashboard kpi stats revenue mrr forecast reminders',
       onSelect: () => run(() => ui.setView('dashboard')),
     },
     {
@@ -257,7 +246,13 @@ function RootPage({
       hint: next ? `עוד ${todo.length}` : undefined,
       onSelect: () => run(() => ui.setView('today')),
     },
-    { id: 'go-pipeline', label: 'משפך המכירות', icon: SquareKanban, keywords: 'משפך לידים רשימה כל הלידים pipeline leads list', onSelect: () => run(() => ui.setView('pipeline')) },
+    {
+      id: 'go-pipeline',
+      label: 'טבלת הלידים',
+      icon: SquareKanban,
+      keywords: 'לידים טבלה לוח סטטוס חדש נוצר קשר וואטסאפ הצעת מחיר לקוח משפך רשימה כל הלידים מיון סינון pipeline table board leads list',
+      onSelect: () => run(() => ui.setView('pipeline')),
+    },
     {
       id: 'go-prospector',
       label: 'מאתר הלידים: חיפוש עסקים חדשים',
@@ -278,12 +273,11 @@ function RootPage({
         }),
     },
     {
-      id: 'whatsapp',
-      label: 'סנכרון וואטסאפ',
+      id: 'whatsapp-templates',
+      label: 'תבניות הודעות וואטסאפ',
       icon: MessageCircle,
-      keywords: 'וואטסאפ קישור סנכרון קריאה בלבד whatsapp link qr sync read-only guard',
-      hint: whatsapp?.enabled ? WHATSAPP_STATE[whatsapp.link.state] : whatsapp ? 'כבוי' : undefined,
-      onSelect: () => run(() => useWhatsApp.getState().setOpen(true)),
+      keywords: 'וואטסאפ תבניות הודעה מוכנה נוסח עריכה whatsapp templates message',
+      onSelect: () => run(() => ui.openTemplates()),
     },
     { id: 'add', label: 'ליד חדש', icon: Plus, keywords: 'ליד חדש הוספה יצירה new add create lead', shortcut: 'N', onSelect: () => run(() => ui.setAddOpen(true)) },
     { id: 'import', label: 'ייבוא לידים', icon: ClipboardPaste, keywords: 'ייבוא הדבקה רשימה אקסל import paste csv bulk', shortcut: 'I', onSelect: () => run(() => ui.setImportOpen(true)) },
@@ -403,8 +397,7 @@ function LeadPage({
   onStep,
 }: PageProps & { lead: Lead; standalone: boolean; onBack: () => void; onStep: (step: LastStep) => void }) {
   const ui = useUi();
-  const whatsappOn = useWhatsApp((s) => s.status?.enabled === true && s.status.link.state === 'connected');
-  const commands = leadCommands(lead, { whatsapp: whatsappOn });
+  const commands = leadCommands(lead);
   const words = normalize(search).split(' ').filter(Boolean);
   const shown = words.length ? commands.filter((item) => words.every((word) => normalize(`${item.label} ${item.hint ?? ''}`).includes(word))) : commands;
   const badge = leadBadge(lead);
@@ -417,7 +410,7 @@ function LeadPage({
       case 'advance':
       case 'archive': {
         const closing = item.command === 'advance' && lead.stage === 'zoom';
-        const result = store.act(lead.id, item.command);
+        const result = store.act(lead.id, item.command, { channel: 'call' });
         if (!result) return;
         if (closing) {
           // A closed deal needs its amounts: straight to the Details tab, which starts on the setup fee.
@@ -432,6 +425,16 @@ function LeadPage({
           return;
         }
         onStep({ leadId: lead.id, leadName: lead.name, actionId: result.id, label: item.label });
+        return;
+      }
+      case 'whatsapp': {
+        // The chat opens in WhatsApp with the ready message, and the lead moves to "נשלח וואטסאפ" (Undo in the toast)
+        const message = messageFor(lead);
+        const href = whatsAppHref(lead.phone, message);
+        if (!href) return;
+        window.open(href, '_blank', 'noopener,noreferrer');
+        ui.closePalette();
+        logWhatsApp(lead, message);
         return;
       }
       case 'undo':
@@ -457,10 +460,6 @@ function LeadPage({
           () => toast.error('לא הצלחנו להעתיק את המספר.'),
         );
         ui.closePalette();
-        return;
-      case 'whatsapp-history':
-        ui.closePalette();
-        void useWhatsApp.getState().fetchHistory(lead.id);
         return;
     }
   };

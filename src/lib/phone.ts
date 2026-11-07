@@ -23,9 +23,15 @@ export function telHref(raw: string): string | null {
   return number ? `tel:+${number}` : null;
 }
 
-export function whatsAppHref(raw: string): string | null {
+/**
+ * Opens WhatsApp (the app on a phone, WhatsApp Web or the desktop app on a computer) on the chat with this number,
+ * with `text` ready in the message box. Nothing is sent: you read it, change it if you like, and press send.
+ */
+export function whatsAppHref(raw: string, text = ''): string | null {
   const number = toInternational(raw);
-  return number ? `https://wa.me/${number}` : null;
+  if (!number) return null;
+  const message = text.trim();
+  return message ? `https://wa.me/${number}?text=${encodeURIComponent(message)}` : `https://wa.me/${number}`;
 }
 
 /** Shows Israeli numbers as 052-000-0187 and leaves anything else as typed. */

@@ -83,9 +83,9 @@ function NewLeadForm({ onDone }: { onDone: () => void }) {
     const lead = addLead(form);
     forgetDraft();
     const ui = useUi.getState();
-    if (ui.query || (ui.stageFilter !== 'all' && ui.stageFilter !== 'cold_call') || (ui.campaignFilter && ui.campaignFilter !== lead.campaign)) {
-      ui.resetFilters();
-    }
+    // A new lead is "חדש": the leads show it, without a search, niche or status filter that would hide it
+    if (ui.query || (ui.campaignFilter && ui.campaignFilter !== lead.campaign) || (ui.statusFilter.length && !ui.statusFilter.includes('new'))) ui.resetFilters();
+    if (ui.boardTab !== 'new') ui.setBoardTab('new');
     ui.highlight([lead.id]);
     toast.success('הליד נוסף', lead.name);
     onDone();
@@ -111,7 +111,7 @@ function NewLeadForm({ onDone }: { onDone: () => void }) {
     >
       <DialogHeading
         title="ליד חדש"
-        description="ליד חדש מתחיל בשלב שיחה קרה ונכנס למאגר של העשירייה היומית. רק שם העסק הוא חובה."
+        description="ליד חדש נכנס בסטטוס ״חדש״ ולמאגר של העשירייה היומית. רק שם העסק הוא חובה."
       />
 
       <DialogBody className="space-y-7">

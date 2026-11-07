@@ -1,10 +1,8 @@
 import { AnimatePresence, motion } from 'motion/react';
-import { ClipboardPaste, MessageCircle, Moon, Plus, Search, Sun } from 'lucide-react';
+import { ClipboardPaste, Moon, Plus, Search, Sun } from 'lucide-react';
 import { appConfig } from '../config';
 import { useMediaQuery } from '../hooks/useMediaQuery';
-import { cn } from '../lib/cn';
 import { useUi } from '../store/ui';
-import { useWhatsApp } from '../store/whatsapp';
 import { BrandMark } from './BrandMark';
 import { MOD } from './palette/CommandPalette';
 import { SyncStatus } from './SyncStatus';
@@ -30,7 +28,6 @@ export function Header() {
       <div className="flex items-center gap-1 sm:gap-2">
         <SyncStatus />
         <PaletteButton />
-        <WhatsAppButton />
         <ThemeToggle />
         {/* Next to the tabs (from 1024 up) the header is full, so the import button is an icon there too */}
         <Button variant="ghost" size="icon" className="sm:max-lg:hidden" aria-label="ייבוא לידים" title="ייבוא לידים (I)" onClick={() => setImportOpen(true)}>
@@ -54,7 +51,7 @@ const paletteKeys = () => (MOD === '⌘' ? '⌘K' : 'Ctrl K');
 
 /**
  * Opens the Ctrl+K command palette. The shortcut is in its tooltip and in the footer's hints: the header is full
- * once the tabs sit in it, more so with the server's WhatsApp button.
+ * once the tabs sit in it.
  */
 function PaletteButton() {
   const openPalette = useUi((s) => s.openPalette);
@@ -75,37 +72,6 @@ function PaletteButton() {
         <span className="flex-1 text-start">חיפוש</span>
       </button>
     </>
-  );
-}
-
-/** The WhatsApp sync's state at a glance; opens its panel */
-function WhatsAppButton() {
-  const status = useWhatsApp((s) => s.status);
-  const setOpen = useWhatsApp((s) => s.setOpen);
-  if (!status) return null;
-  const state = status.enabled ? status.link.state : 'off';
-  const dot =
-    state === 'connected'
-      ? 'bg-[var(--whatsapp)]'
-      : state === 'stopped'
-        ? 'bg-[var(--st-lost)]'
-        : state === 'linking' || state === 'connecting' || state === 'reconnecting'
-          ? 'bg-[var(--st-no-answer)] animate-pulse'
-          : null;
-  const label = {
-    connected: 'וואטסאפ: מסונכרן, קריאה בלבד',
-    stopped: 'וואטסאפ: הסנכרון נעצר',
-    linking: 'וואטסאפ: מחכה לטלפון שלך',
-    connecting: 'וואטסאפ: מתחבר',
-    reconnecting: 'וואטסאפ: מתחבר מחדש',
-    unlinked: 'וואטסאפ: לא מקושר',
-    off: 'סנכרון הוואטסאפ כבוי',
-  }[state];
-  return (
-    <Button variant="ghost" size="icon" aria-label={label} title={label} onClick={() => setOpen(true)} className="relative">
-      <MessageCircle className="size-[18px]" style={state === 'connected' ? { color: 'var(--whatsapp)' } : undefined} aria-hidden />
-      {dot && <span className={cn('absolute top-2 end-2 size-2 rounded-full ring-2 ring-[var(--canvas)]', dot)} />}
-    </Button>
   );
 }
 

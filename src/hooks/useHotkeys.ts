@@ -7,7 +7,7 @@ const isTypingTarget = (target: EventTarget | null) =>
 
 /**
  * Ctrl+K (⌘K) opens the command palette from anywhere, on the open lead if there is one.
- * N adds a lead, I imports a list, / focuses search, Esc closes the open lead.
+ * N adds a lead, I imports a list, / focuses the leads search.
  * Matches physical keys (event.code), so the shortcuts also work on a Hebrew keyboard layout.
  */
 export function useHotkeys() {
@@ -33,9 +33,9 @@ export function useHotkeys() {
         ui.setImportOpen(true);
       } else if (event.code === 'Slash') {
         event.preventDefault();
-        document.getElementById('lead-search')?.focus();
-      } else if (event.key === 'Escape' && ui.expandedId) {
-        ui.setExpanded(null);
+        if (ui.view !== 'pipeline') ui.setView('pipeline');
+        // The search is on the leads view: on another view it shows once that view has rendered
+        window.setTimeout(() => document.getElementById('lead-search')?.focus(), ui.view === 'pipeline' ? 0 : 60);
       }
     };
     window.addEventListener('keydown', onKeyDown);

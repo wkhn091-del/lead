@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Activity, CoachingReport, Interaction, Lead, LeadPulse } from '../types';
-import { closeOdds, dueLabel, forecast, nextRenewal, openDeals, pulseFrom, reminders, type Reminder } from './dashboard';
+import { closeOdds, dueLabel, forecast, homeStats, nextRenewal, openDeals, pulseFrom, reminders, type Reminder } from './dashboard';
 import { NO_DEAL } from './deal';
 import { nicheCounts, nicheKey, nicheOf } from './niche';
 
@@ -236,6 +236,46 @@ describe('the dashboard', () => {
       pricing: null,
       nextCall: { inDays: null },
     });
+  });
+});
+
+describe('the home screen', () => {
+  it('counts the leads, the new ones, the closed deals and their money, from the leads alone', () => {
+    const leads = [
+      lead({ createdAt: day(0, 8) }),
+      lead({ createdAt: day(0, 9), archivedAt: day(0, 9) }),
+      lead({ createdAt: day(-1, 23) }),
+      lead({ createdAt: day(-6, 0) }),
+      lead({ createdAt: day(-7, 23) }),
+      zoom(day(-2)),
+      closed({ setupFee: 4500, monthlyRetainer: 350, hostingYearly: 600 }, day(-3)),
+      closed({ setupFee: 6000, monthlyRetainer: 0, hostingYearly: 0 }, day(-40)),
+      closed({ ...NO_DEAL }, day(-1)),
+      closed({ setupFee: 1200, monthlyRetainer: 90, hostingYearly: 0 }, day(-5), { currency: 'USD' }),
+      // A client marked not relevant later no longer counts as a deal
+      closed({ setupFee: 9999, monthlyRetainer: 999, hostingYearly: 0 }, day(-9), { archivedAt: day(-2) }),
+    ];
+    expect(homeStats(leads, NOW)).toEqual({
+      total: 11,
+      active: 9,
+      archived: 2,
+      newToday: 2,
+      newYesterday: 1,
+      newThisWeek: 4,
+      closed: 4,
+      closedThisMonth: 3,
+      quotes: 1,
+      currency: 'ILS',
+      revenue: 10_500,
+      pricedDeals: 2,
+      mrr: 350,
+      retainerClients: 1,
+      others: { USD: { revenue: 1200, mrr: 90 } },
+    });
+  });
+
+  it('has nothing to count before there are leads', () => {
+    expect(homeStats([], NOW)).toMatchObject({ total: 0, newToday: 0, closed: 0, revenue: 0, mrr: 0, others: {} });
   });
 });
 

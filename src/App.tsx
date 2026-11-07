@@ -10,6 +10,8 @@ import { OfflineBanner } from './components/OfflineBanner';
 import { PreviewBanner } from './components/PreviewBanner';
 import { DashboardView } from './components/dashboard/DashboardView';
 import { CommandPalette } from './components/palette/CommandPalette';
+import { CallLogDialog } from './components/pipeline/CallLogDialog';
+import { WhatsAppDialog } from './components/whatsapp/WhatsAppDialog';
 import { PipelineView } from './components/pipeline/PipelineView';
 import { ProspectorView } from './components/prospector/ProspectorView';
 import { SampleDataBanner } from './components/SampleDataBanner';
@@ -18,8 +20,8 @@ import { TodayView } from './components/today/TodayView';
 import { Toaster } from './components/Toaster';
 import { TrainingView } from './components/training/TrainingView';
 import { ViewTabs } from './components/ViewTabs';
-import { WhatsAppPanel } from './components/whatsapp/WhatsAppPanel';
 import { useHotkeys } from './hooks/useHotkeys';
+import { cn } from './lib/cn';
 import { drafts } from './lib/drafts';
 import { campaignCounts } from './lib/leads';
 import { EASE_OUT } from './lib/motion';
@@ -31,9 +33,8 @@ import { useSync } from './store/sync';
 import { useTimeline } from './store/timeline';
 import { useTraining } from './store/training';
 import { useUi } from './store/ui';
-import { useWhatsApp } from './store/whatsapp';
 
-/** No sign-in: the app opens straight on the dashboard, and everything loads from the start. */
+/** No sign-in: the app opens straight on the leads board, and everything loads from the start. */
 export default function App() {
   useEffect(() => {
     // The copy kept on this device shows at once, even before the server answers (or when it can't)
@@ -128,7 +129,8 @@ function Dashboard() {
 
   return (
     <>
-      <div className="page mx-auto w-full max-w-[1180px]">
+      {/* The board's columns get the width of a wide screen; the other views read better narrower */}
+      <div className={cn('page mx-auto w-full', view === 'pipeline' ? 'max-w-[1480px]' : 'max-w-[1180px]')}>
         <Header />
         <ViewTabs className="mb-5 max-sm:hidden lg:hidden" />
         <PreviewBanner />
@@ -162,7 +164,8 @@ function Dashboard() {
       <AddLeadDialog />
       <ImportDialog />
       <LeadModal />
-      <WhatsAppPanel />
+      <CallLogDialog />
+      <WhatsAppDialog />
       <CommandPalette />
       <CampaignOptions />
     </>
@@ -182,7 +185,6 @@ function refreshAll() {
 function loadAlongsideLeads() {
   void useTimeline.getState().loadFeatures();
   void useTraining.getState().load();
-  void useWhatsApp.getState().refresh();
   void useProspector.getState().load();
   void useDashboard.getState().load();
 }

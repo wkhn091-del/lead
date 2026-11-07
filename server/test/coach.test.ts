@@ -58,15 +58,17 @@ describe('coaching prompt', () => {
     entry({ kind: 'whatsapp', outcome: null, step: null, stage: 'zoom', body: 'Sent the Zoom link.' }),
     entry({ kind: 'zoom', outcome: 'no_show', step: 'no_answer', stage: 'zoom' }),
     entry({ kind: 'call', outcome: 'answered', step: 'answered', stage: 'zoom', body: 'Rescheduled to Sunday.' }),
+    entry({ kind: 'whatsapp', outcome: null, step: 'whatsapp', stage: 'zoom', body: 'Sent the quote.' }),
   ];
 
   it('numbers every phone call as an attempt and names the other entries', () => {
     expect(describeEntries(history)).toEqual([
       'ניסיון 1: אין מענה',
-      'ניסיון 2: ענה ← פגישת זום',
+      'ניסיון 2: ענה ← הצעת מחיר',
       'הודעת וואטסאפ',
       'פגישת זום: הליד לא הגיע',
       'ניסיון 3: ענה',
+      'נשלח וואטסאפ',
     ]);
   });
 
@@ -83,7 +85,7 @@ describe('coaching prompt', () => {
     expect(prompt).toContain('Today is Thu, 22 Oct 2026 (Asia/Jerusalem).');
     expect(prompt).toContain('<entry n="1" at="Thu, 1 Oct 2026, 11:00" type="ניסיון 1: אין מענה" />');
     expect(prompt.indexOf('Booked a Zoom')).toBeLessThan(prompt.indexOf('Rescheduled to Sunday'));
-    expect(prompt).toContain('Stage: Zoom Meeting, since Fri, 2 Oct 2026');
+    expect(prompt).toContain('Stage: Quote, since Fri, 2 Oct 2026');
     expect(prompt).toContain('Last contact: Fri, 2 Oct 2026, 11:00 (20 days ago)');
     expect(prompt).not.toMatch(/050-000-0142|moshe@arbel|arbel-olive\.example/);
     expect(system).toContain('Premium websites for wineries');
@@ -270,20 +272,35 @@ describe('analysis schema', () => {
 
 describe('providers', () => {
   const received: { path: string; headers: IncomingMessage['headers']; body: Record<string, unknown> }[] = [];
-  type Answer = { status: number; body: unknown; headers?: Record<string, string> };
+  /** `delayMs`: answers that late; `drop`: closes the connection without an answer */
+  type Answer = { status: number; body: unknown; headers?: Record<string, string>; delayMs?: number; drop?: boolean };
   let reply: Answer = { status: 200, body: {} };
   /** Answers given before `reply`, one per request: a rate limit first, say */
   const queued: Answer[] = [];
+  /** Requests being answered right now, and the most there were at once */
+  let inFlight = 0;
+  let mostInFlight = 0;
   const server = createServer((req, res) => {
     let raw = '';
     req.on('data', (chunk) => (raw += chunk));
     req.on('end', () => {
       received.push({ path: req.url ?? '', headers: req.headers, body: JSON.parse(raw) });
       const answer = queued.shift() ?? reply;
-      res.writeHead(answer.status, { 'content-type': 'application/json', ...answer.headers });
-      res.end(JSON.stringify(answer.body));
+      if (answer.drop) {
+        req.socket.destroy();
+        return;
+      }
+      inFlight += 1;
+      mostInFlight = Math.max(mostInFlight, inFlight);
+      setTimeout(() => {
+        inFlight -= 1;
+        if (res.destroyed) return;
+        res.writeHead(answer.status, { 'content-type': 'application/json', ...answer.headers });
+        res.end(JSON.stringify(answer.body));
+      }, answer.delayMs ?? 0);
     });
   });
+  const answered = { status: 200, body: { choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(sampleAnalysis) } }] } };
   let baseUrl = '';
   const request = { system: 'Coach.', prompt: 'The lead.', schema: ANALYSIS_JSON_SCHEMA, maxTokens: 8000 };
 
@@ -383,7 +400,7 @@ describe('providers', () => {
     await expect(gemini.complete(request)).rejects.toMatchObject({ message: expect.stringMatching(/המכסה החינמית של Gemini/) });
 
     // Out of tries
-    queued.push({ status: 429, body: {} }, { status: 429, body: {} }, { status: 429, body: {} });
+    queued.push({ status: 429, body: {} }, { status: 429, body: {} }, { status: 429, body: {} }, { status: 429, body: {} });
     const openai = createCoachProvider({ provider: 'openai', apiKey: 'k', model: 'm', baseUrl, retryDelayMs: 1 });
     await expect(openai.complete(request)).rejects.toMatchObject({ message: expect.stringMatching(/מגבלת הקצב/) });
   });
@@ -394,8 +411,66 @@ describe('providers', () => {
     await expect(claude.complete(request)).rejects.toMatchObject({ status: 502, message: expect.stringMatching(/AI_API_KEY/) });
     reply = { status: 529, body: { error: { message: 'Overloaded' } } };
     await expect(claude.complete(request)).rejects.toMatchObject({ message: expect.stringMatching(/יש תקלה/) });
-    const unreachable = createCoachProvider({ provider: 'openai', apiKey: 'x', model: 'm', baseUrl: 'http://127.0.0.1:9' });
-    await expect(unreachable.complete(request)).rejects.toMatchObject({ status: 502 });
+    const unreachable = createCoachProvider({ provider: 'openai', apiKey: 'x', model: 'm', baseUrl: 'http://127.0.0.1:9', retryDelayMs: 1 });
+    await expect(unreachable.complete(request)).rejects.toMatchObject({ status: 502, message: expect.stringMatching(/לא הצליח להגיע/) });
+  });
+
+  it('gets past server errors and a dropped connection, and asks again for an answer that came back broken', async () => {
+    const gemini = createCoachProvider({ provider: 'gemini', apiKey: 'k2', model: 'm', baseUrl, retryDelayMs: 1 });
+    reply = answered;
+    const before = received.length;
+    queued.push({ status: 500, body: { error: { message: 'Internal error encountered.' } } }, { status: 0, body: null, drop: true }, { status: 502, body: {} });
+    expect(await gemini.complete(request)).toEqual(sampleAnalysis);
+    expect(received.length - before).toBe(4);
+
+    queued.push({ status: 200, body: { choices: [{ finish_reason: 'stop', message: { content: '{"summary": "half an ans' } }] } });
+    expect(await gemini.complete(request)).toEqual(sampleAnalysis);
+  });
+
+  it('asks in plain JSON mode when the provider refuses the schema itself', async () => {
+    const gemini = createCoachProvider({ provider: 'gemini', apiKey: 'k3', model: 'm', baseUrl, retryDelayMs: 1 });
+    reply = answered;
+    queued.push({ status: 400, body: [{ error: { code: 400, message: 'Invalid JSON payload received. Unknown name "strict" at \'response_format.json_schema\'' } }] });
+    expect(await gemini.complete(request)).toEqual(sampleAnalysis);
+    const [refused, plain] = received.slice(-2);
+    expect(refused.body.response_format).toMatchObject({ type: 'json_schema' });
+    expect(plain.body.response_format).toEqual({ type: 'json_object' });
+    expect((plain.body.messages as { content: string }[])[0].content).toContain('follows this JSON Schema exactly');
+  });
+
+  it('moves to the fallback model when the main one stays overloaded', async () => {
+    const gemini = createCoachProvider({ provider: 'gemini', apiKey: 'k4', model: 'gemini-pro-test', fallbackModel: 'gemini-flash-test', baseUrl, retries: 1, retryDelayMs: 1 });
+    reply = answered;
+    queued.push({ status: 503, body: { error: { message: 'The model is overloaded.' } } }, { status: 503, body: { error: { message: 'The model is overloaded.' } } });
+    expect(await gemini.complete(request)).toEqual(sampleAnalysis);
+    expect(received.slice(-3).map((sent) => sent.body.model)).toEqual(['gemini-pro-test', 'gemini-pro-test', 'gemini-flash-test']);
+  });
+
+  it('lets only so many requests reach one AI account at once, and the rest wait their turn', async () => {
+    reply = { ...answered, delayMs: 60 };
+    mostInFlight = 0;
+    const one = createCoachProvider({ provider: 'gemini', apiKey: 'shared-key', model: 'm', baseUrl, maxConcurrent: 1 });
+    const other = createCoachProvider({ provider: 'gemini', apiKey: 'shared-key', model: 'cheaper', baseUrl, maxConcurrent: 1 });
+    const answers = await Promise.all([one.complete(request), one.complete(request), other.complete(request)]);
+    expect(answers).toEqual([sampleAnalysis, sampleAnalysis, sampleAnalysis]);
+    expect(mostInFlight).toBe(1);
+
+    // A turn that can't come before the deadline: a clear "busy" instead of a hang
+    reply = { ...answered, delayMs: 1500 };
+    const hurried = createCoachProvider({ provider: 'gemini', apiKey: 'busy-key', model: 'm', baseUrl, maxConcurrent: 1, deadlineMs: 3500 });
+    const results = await Promise.allSettled([hurried.complete(request), hurried.complete(request)]);
+    expect(results[0]).toMatchObject({ status: 'fulfilled' });
+    expect(results[1]).toMatchObject({ status: 'rejected', reason: { status: 503, message: expect.stringMatching(/עסוק/) } });
+    reply = answered;
+  });
+
+  it('answers within its deadline, even when the provider is slow', async () => {
+    reply = { ...answered, delayMs: 5000 };
+    const slow = createCoachProvider({ provider: 'openai', apiKey: 'slow-key', model: 'm', baseUrl, deadlineMs: 4000 });
+    const started = Date.now();
+    await expect(slow.complete(request)).rejects.toMatchObject({ status: 504 });
+    expect(Date.now() - started).toBeLessThan(4500);
+    reply = answered;
   });
 });
 

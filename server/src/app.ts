@@ -15,10 +15,8 @@ import type { Stores } from './stores/types.js';
 import { createTimelineRouter } from './timeline/timeline.routes.js';
 import { createTrainingRouter } from './training/training.routes.js';
 import type { TranscriptionQueue } from './transcription/queue.js';
-import type { WhatsAppService } from './whatsapp/service.js';
 import type { ProspectorEngine } from './prospector/engine.js';
 import { createProspectorRouter } from './prospector/prospector.routes.js';
-import { createLeadWhatsAppRouter, createWhatsAppRouter } from './whatsapp/whatsapp.routes.js';
 
 export interface AppServices {
   stores: Stores;
@@ -32,10 +30,6 @@ export interface AppServices {
   transcriptionOff?: string | null;
   /** Defaults to MAX_UPLOAD_MB */
   maxUploadMb?: number;
-  /** The read-only WhatsApp sync; null when it is off */
-  whatsapp?: WhatsAppService | null;
-  /** Why the WhatsApp sync is off */
-  whatsappOff?: string | null;
   /** The Prospector; null when no search provider is set up */
   prospector?: ProspectorEngine | null;
   /** Why the Prospector is off */
@@ -54,8 +48,6 @@ const BULK_PATHS = new Set(['/leads/bulk', '/leads/import-json']);
 export function createApp(services: AppServices, clock: () => Date = () => new Date()) {
   const { stores, storage, coach } = services;
   const transcription = services.transcription ?? null;
-  const whatsapp = services.whatsapp ?? null;
-  const whatsappOff = services.whatsappOff ?? 'הסנכרון עם וואטסאפ כבוי בשרת. הגדירו WHATSAPP=on כדי להפעיל אותו.';
   const maxUploadMb = services.maxUploadMb ?? config.media.maxUploadMb;
   const prospector = services.prospector ?? null;
   const prospectorOff = services.prospectorOff ?? 'מאתר הלידים כבוי בשרת: הגדירו GOOGLE_PLACES_API_KEY (או SERPAPI_KEY) כדי להפעיל אותו.';
@@ -94,11 +86,11 @@ export function createApp(services: AppServices, clock: () => Date = () => new D
   api.get('/features', (_req, res) => {
     res.json({
       coach: coach ? { provider: coach.name, model: coach.model } : null,
-      media: { storage: storage.kind, maxUploadMb },
+      // Recordings on a local disk in production go when the host replaces the disk (Render: every deploy)
+      media: { storage: storage.kind, maxUploadMb, persistent: storage.kind === 's3' || !config.isProduction || config.media.persistentDisk },
       transcription: transcription
         ? { enabled: true, service: transcription.transcriber.service, model: transcription.transcriber.model }
         : { enabled: false, reason: services.transcriptionOff ?? 'התמלול כבוי בשרת.' },
-      whatsapp: whatsapp ? { enabled: true } : { enabled: false, reason: whatsappOff },
       prospector: prospector
         ? { enabled: true, provider: prospector.providerName, backup: prospector.backupName, browser: prospector.browser, ai: prospector.ai }
         : { enabled: false, reason: prospectorOff },
@@ -106,30 +98,16 @@ export function createApp(services: AppServices, clock: () => Date = () => new D
   });
   api.use(
     '/leads',
-    createLeadsRouter(
-      stores,
-      storage,
-      clock,
-      transcription,
-      { leadsChanged: (created) => whatsapp?.leadsChanged(created) },
-      config.whatsapp.countryCode,
-    ),
+    createLeadsRouter(stores, storage, clock, transcription, config.countryCode),
     createTimelineRouter(stores, clock),
     leadMedia,
     createCoachRouter(stores, coach, coachSettings, clock),
-    createLeadWhatsAppRouter(whatsapp, whatsappOff),
   );
   api.use('/media', media);
   api.use('/daily', createDailyRouter(stores, clock));
   api.use('/dashboard', createDashboardRouter(stores));
   api.use('/training', createTrainingRouter(stores, coach, coachSettings, clock));
-  api.use('/whatsapp', createWhatsAppRouter(whatsapp, whatsappOff, config.whatsapp.countryCode));
-  api.use(
-    '/prospector',
-    createProspectorRouter(stores, storage, prospector, prospectorOff, config.whatsapp.countryCode, clock, {
-      leadsChanged: (created) => whatsapp?.leadsChanged(created),
-    }),
-  );
+  api.use('/prospector', createProspectorRouter(stores, storage, prospector, prospectorOff, config.countryCode, clock));
   api.use(notFoundHandler);
   app.use('/api', api);
 

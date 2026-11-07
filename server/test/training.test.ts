@@ -6,7 +6,7 @@ import { STARTER_CARDS, STARTER_KEYS } from '../src/training/starter.js';
 import { createApp } from '../src/app.js';
 import type { CoachProvider, CoachRequest } from '../src/coach/providers.js';
 import { createLocalStorage } from '../src/media/storage.js';
-import { createMemoryStores } from '../src/stores/memory.js';
+import { createMemoryStores } from './memory-stores.js';
 import { freshPractice, type InteractionRecord, type LeadRecord, type ObjectionCardDraft } from '../src/stores/types.js';
 import { review } from '../src/training/practice.js';
 import { buildTrainingPrompt, cardKey, quoteFound, toDrafts } from '../src/training/prompt.js';

@@ -8,7 +8,7 @@ import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app.js';
 import { createLocalStorage } from '../src/media/storage.js';
-import { createMemoryStores } from '../src/stores/memory.js';
+import { createMemoryStores } from './memory-stores.js';
 import { TranscriptionError } from '../src/transcription/errors.js';
 import { findFfmpeg, planParts, prepareAudio, runFfmpeg } from '../src/transcription/ffmpeg.js';
 import { cleanKeywords, createOpenAITranscriber, type Transcriber } from '../src/transcription/openai.js';

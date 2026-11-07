@@ -59,6 +59,10 @@ export function applyAction(lead: Lead, action: LeadAction, now: Date): Lead {
     case 'archive':
       if (lead.stage === 'closed') throw new WorkflowError('אי אפשר לסמן עסקה סגורה כלא רלוונטית.');
       return { ...lead, archivedAt: at, activity: log('archived', null), updatedAt: at };
+    case 'whatsapp':
+      // A message sent to the lead: today's contact, like a call, but not a call attempt
+      if (lead.stage === 'closed') throw new WorkflowError('העסקה הזו כבר סגורה.');
+      return { ...lead, lastAttemptAt: at, activity: log('whatsapp', null), updatedAt: at };
   }
 }
 
@@ -88,14 +92,16 @@ export function undoAction(lead: Lead, actionId: string, now: Date): Lead {
 }
 
 /** A step that counts as a call: every outcome of a cold call, and follow-ups that were tried or picked up. */
-export const isCall = (entry: Activity) => entry.type === 'no_answer' || entry.type === 'answered' || entry.from === 'cold_call';
+export const isCall = (entry: Activity) =>
+  entry.type !== 'whatsapp' && (entry.type === 'no_answer' || entry.type === 'answered' || entry.from === 'cold_call');
 
 /** Picked up at least once: contacted, so it no longer comes up in the random daily draw. */
 export const wasAnswered = (lead: Pick<Lead, 'activity'>) => lead.activity.some((entry) => entry.type === 'answered');
 
 /**
- * The timeline entry a step creates (server/src/leads/workflow.ts does the same): a phone call while
- * the lead is at Cold Call and a Zoom meeting once it is at Zoom Meeting, unless `channel` says otherwise.
+ * The timeline entry a step creates (server/src/leads/workflow.ts does the same): a WhatsApp message for a
+ * whatsapp step, and otherwise a phone call while the lead is at the outreach stage and a Zoom meeting once it is
+ * at the quote stage, unless `channel` says otherwise.
  */
 export function timelineEntryFor(entry: Activity, leadId: string, body = '', channel?: Channel): Interaction {
   const meeting = (channel ?? (entry.from === 'zoom' ? 'zoom' : 'call')) === 'zoom';
@@ -104,11 +110,12 @@ export function timelineEntryFor(entry: Activity, leadId: string, body = '', cha
     answered: meeting ? 'held' : 'answered',
     no_answer: meeting ? 'no_show' : 'no_answer',
     archived: null,
+    whatsapp: null,
   };
   return {
     id: entry.id,
     leadId,
-    kind: meeting ? 'zoom' : 'call',
+    kind: entry.type === 'whatsapp' ? 'whatsapp' : meeting ? 'zoom' : 'call',
     outcome: outcome[entry.type],
     body: body.trim(),
     step: entry.type,
@@ -120,12 +127,12 @@ export function timelineEntryFor(entry: Activity, leadId: string, body = '', cha
 }
 
 /**
- * What undoing a step does to its timeline entry: what was written stays, as a plain note.
- * An entry with no notes and no recordings goes away (null).
+ * What undoing a step does to its timeline entry: what was written stays, as a plain note (a WhatsApp step's, as
+ * a plain WhatsApp message). An entry with no notes and no recordings goes away (null).
  */
 export function entryAfterUndo(entry: Interaction, hasRecordings: boolean): Interaction | null {
   if (!entry.body && !hasRecordings) return null;
-  return { ...entry, kind: 'note', outcome: null, step: null, stageTo: null };
+  return { ...entry, kind: entry.kind === 'whatsapp' ? 'whatsapp' : 'note', outcome: null, step: null, stageTo: null };
 }
 
 /** Calls logged in the calendar month of `now`, in this browser's time zone. */

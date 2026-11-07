@@ -1,8 +1,8 @@
 # Omek Leads API
 
-Express 5, Prisma 6 and MongoDB. It stores the CRM's leads and a timeline of every call, Zoom meeting, message and note, keeps call and Zoom recordings and transcribes them automatically, runs the sales funnel and the Daily 10 queue, takes bulk imports, asks Claude, OpenAI or Gemini (free tier available) to coach you on each deal, and runs the Prospector, which finds local businesses and scores how badly they need a new website. There is no sign-in: it's a personal CRM, and the app opens straight on the dashboard (see [No sign-in](#no-sign-in)).
+Express 5, Prisma 6 and MongoDB. It stores the CRM's leads and a timeline of every call, Zoom meeting, message and note, keeps call and Zoom recordings and transcribes them automatically, runs the sales funnel and the Daily 10 queue, takes bulk imports, asks Claude, OpenAI or Gemini (free tier available) to coach you on each deal, and runs the Prospector, which finds local businesses and scores how badly they need a new website. Everything is kept in MongoDB and written the moment it changes: every lead, status change, deal and retainer, timeline entry and import. There is no in-memory mode, so a deploy or a restart never loses anything. There is no sign-in: it's a personal CRM, and the app opens straight on its home screen (see [No sign-in](#no-sign-in)).
 
-Messages the app shows (errors, reasons a feature is off, WhatsApp states) are in Hebrew, like the app; the server log stays in English.
+Messages the app shows (errors, reasons a feature is off) are in Hebrew, like the app; the server log stays in English.
 
 Prisma 7 doesn't support MongoDB yet, so this uses Prisma 6.19, the newest release that does. When Prisma adds MongoDB to version 7, only `src/db.ts` and `src/stores/prisma.ts` touch Prisma.
 
@@ -28,7 +28,7 @@ npm run dev                   # http://localhost:5173 now opens on the server's 
 
 The Vite dev server forwards `/api` to port 4000, so the browser sees one origin and needs no CORS.
 
-**No database yet?** Set `STORAGE=memory` in `server/.env` to run everything, imports included, with leads kept in memory. They disappear when the server stops, and the server refuses this setting in production.
+**The database comes first.** The server starts only once MongoDB answers: at startup it connects (5 tries, 3 seconds apart, for a database still waking up), logs which database it's using and how many leads it holds (`MongoDB: connected to the "omek_leads" database, 312 leads stored.`), and stops with what to fix when it can't. `docker compose up -d` above gives you one locally in a minute, or use a free Atlas cluster (see [MongoDB Atlas](#mongodb-atlas)). The old `STORAGE=memory` setting is gone: it kept leads in memory, where every restart of a server (and every deploy, or a free Render instance going to sleep) wiped them. The tests run on an in-memory copy of the stores (`test/memory-stores.ts`), which the server itself never loads.
 
 **AI coach:** add `AI_PROVIDER` and `AI_API_KEY` to `server/.env` (see [The AI sales coach](#the-ai-sales-coach)). Without them everything else works and the coach tab says how to turn it on.
 
@@ -42,17 +42,17 @@ The Vite dev server forwards `/api` to port 4000, so the browser sees one origin
 
 The funnel rules live on the server (`src/leads/workflow.ts`), so no client can bend them.
 
-- **Stages.** Every lead starts at Cold Call, then moves to Zoom Meeting, then Deal Closed, one stage at a time. New and imported leads can't start further along.
-- **Actions.** `advance`, `no_answer` (nobody picked up), `answered` (a conversation that didn't move the deal, like "call me next month") and `archive` (not relevant). Each action carries the stage the client saw and a client-made id, so a retried request is applied once and a step based on an out-of-date view is refused with a 409. It can also carry `body` (what was said) and `channel` (`call` or `zoom`), which go on the timeline entry the step creates.
-- **Undo.** The latest step on a lead can be undone within 10 minutes. After that the funnel only moves forward, and an archived lead stays archived. Whatever was written about an undone step stays on the timeline as a plain note.
+- **Stages.** Every lead starts at outreach (`cold_call`, "פנייה"), then moves to the quote (`zoom`, "הצעת מחיר"), then the closed deal (`closed`, "נסגר / לקוח"), one stage at a time. New and imported leads can't start further along. The stored names are the original ones, so no data had to move; the app's board shows a lead in outreach as "חדש", "נוצר קשר (שיחה)" or "נשלח וואטסאפ" by its latest step, worked out in the browser (`pipelineStatus` in `src/lib/stages.ts`).
+- **Actions.** `advance`, `no_answer` (nobody picked up), `answered` (a conversation that didn't move the deal, like "call me next month"), `archive` (not relevant) and `whatsapp` (a WhatsApp message sent from the app: it sets `lastAttemptAt`, so the lead isn't drawn again that day, but isn't a call attempt; not on a closed deal). Each action carries the stage the client saw and a client-made id, so a retried request is applied once and a step based on an out-of-date view is refused with a 409. It can also carry `body` (what was said) and `channel` (`call` or `zoom`), which go on the timeline entry the step creates.
+- **Undo.** The latest step on a lead can be undone within 10 minutes. After that the funnel only moves forward, and an archived lead stays archived. Whatever was written about an undone step stays on the timeline as a plain note (an undone WhatsApp step's, as a plain WhatsApp message).
 - **Deal terms.** A closed deal has three amounts, in whole units of the lead's currency (`ILS` or `USD`): `setupFee` (one-time, for building the site), `monthlyRetainer` (maintenance and management) and `hostingYearly` (domain and hosting, renewed every year). They, and the currency, can only be set once the deal is closed (409 before that); a `PATCH` may send any of the three and the others stay as they were. A new or imported lead can't arrive with amounts, and undoing the close clears them. Leads saved before deal terms had a single `value`: a closed deal's reads as its setup fee, and moves into the deal terms (the old field removed) the next time its amounts or its stage change.
-- **The Daily 10.** The first request of the day draws `DAILY_QUOTA` leads (10) at random from the pool: uncontacted leads, meaning at Cold Call, never picked up, not archived and not tried today. Every later request that day returns the same leads, on any device. If the pool was short when the day started, the next import tops the day up. Closed and archived leads never enter the pool, leads at Zoom have already been contacted, and so has a lead that answered without booking a Zoom: you follow that one up from the pipeline (the AI coach suggests when). "Today" is the calendar day in `APP_TIMEZONE` (default `Asia/Jerusalem`), so the queue turns over at your midnight, not the server's.
+- **The Daily 10.** The first request of the day draws `DAILY_QUOTA` leads (10) at random from the pool: uncontacted leads, meaning in outreach, never picked up, not archived and not tried (called or messaged) today. Every later request that day returns the same leads, on any device. If the pool was short when the day started, the next import tops the day up. Closed and archived leads never enter the pool, leads at the quote have already been contacted, and so has a lead that answered without asking for a quote: you follow that one up from the leads board (the AI coach suggests when). "Today" is the calendar day in `APP_TIMEZONE` (default `Asia/Jerusalem`), so the queue turns over at your midnight, not the server's.
 
 ## The timeline
 
 Every lead has a timeline in the `interactions` collection, one document per event:
 
-- **Calls and Zoom meetings** come from workflow steps. Logging a step creates its entry with the same id, the notes or transcript you sent, the outcome (`no_answer`, `answered`, `held`, `no_show`) and where the step moved the lead. At Cold Call a step is a phone call; at Zoom Meeting it is a meeting, unless `channel` says it was a call. The frontend numbers phone calls as attempts: "ניסיון 1: אין מענה", "ניסיון 2: ענה ← פגישת זום" (attempt 1: no answer; attempt 2: answered, moved to Zoom Meeting).
+- **Calls and Zoom meetings** come from workflow steps. Logging a step creates its entry with the same id, the notes or transcript you sent, the outcome (`no_answer`, `answered`, `held`, `no_show`) and where the step moved the lead. At outreach a step is a phone call; at the quote it is a Zoom meeting, unless `channel` says it was a call (the app sends `call` from its quick actions). A `whatsapp` step is a WhatsApp message. The frontend numbers phone calls as attempts: "ניסיון 1: אין מענה", "ניסיון 2: ענה ← הצעת מחיר" (attempt 1: no answer; attempt 2: answered, moved to the quote), and titles a WhatsApp step "נשלח וואטסאפ".
 - **Notes, WhatsApp messages and emails** are added directly (`POST /leads/:id/interactions`). A new lead's `notes`, typed in or imported, become its first notes.
 - **Any entry's text can be edited**, up to 100,000 characters (an hour-long Zoom transcript fits). Notes and messages can be deleted; entries that record a step can't, so the funnel's history stays true. Clear their text, or undo the step within 10 minutes.
 
@@ -114,8 +114,21 @@ The job's state lives on the recording (`media.transcription`: status, parts don
 | `AI_MODEL` | optional. Defaults to `claude-sonnet-5-5` for Anthropic, `gpt-6-astra` for OpenAI and `gemini-3.8-flash` for Gemini. |
 | `AI_BUSINESS_CONTEXT` | optional: what you sell, in your own words. Empty, the AI is given Studio Omek's offer, as written in `src/coach/prompt.ts`. Scripts, answers and opening lines only have you claim what it says, and a price range here guides the price recommendation. |
 | `AI_BASE_URL` | optional: a gateway or proxy in front of the same API |
+| `AI_FALLBACK_MODEL` | optional: another model of the same provider, used when the main one is overloaded, out of quota or unknown (for Gemini, a second Flash model, whose free quota is counted apart) |
+| `AI_MAX_CONCURRENT` | requests to the AI at once, from the coach, the objection deck and the Prospector together (default 2); the rest wait their turn |
 
-**Free, with Gemini.** A key from Google AI Studio works without a credit card, within the free tier's limits (a handful of requests a minute and a daily cap, shown in AI Studio). On the free tier, Google's terms let it use what you send to improve its products and have people review it, and they ask you not to send personal information: lead names, your notes and call transcripts are exactly that. The Prospector only sends public website content, so it's a good fit there. For the coach and the objection deck, turn on billing for the key's Google Cloud project: the same key then counts as paid, Google stops using the data, and one person's use costs little. The server waits and tries again after a rate limit (up to twice, when the wait is short), and scores Prospector sites one at a time with Gemini.
+**Free, with Gemini.** A key from Google AI Studio works without a credit card, within the free tier's limits (a handful of requests a minute and a daily cap, shown in AI Studio). On the free tier, Google's terms let it use what you send to improve its products and have people review it, and they ask you not to send personal information: lead names, your notes and call transcripts are exactly that. The Prospector only sends public website content, so it's a good fit there. For the coach and the objection deck, turn on billing for the key's Google Cloud project: the same key then counts as paid, Google stops using the data, and one person's use costs little. The server scores Prospector sites one at a time with Gemini.
+
+**Under load, and when the AI fails.** The provider code never lets a busy or failing AI take the server down or leave the app waiting:
+
+- **Retries.** A rate limit (429), an overloaded or failing service (500, 502, 503, 504, 529, 408) or a dropped connection is tried again, up to 3 times, after the wait the provider asks for (`Retry-After`, or Gemini's `retryDelay`) or 2, 6 and 18 seconds, each with a little randomness so requests that failed together don't come back together. A wait longer than 30 seconds means a quota that won't return soon (a daily limit), so it isn't waited for.
+- **Another model.** With `AI_FALLBACK_MODEL` set, a model that stays busy, has no quota left or doesn't exist hands the request to that one.
+- **One queue per account.** At most `AI_MAX_CONCURRENT` requests go to one AI account at a time, so a Prospector search scoring dozens of sites while you analyze a deal waits its turn instead of hitting the provider's limits. A request that can't get a turn in time is told the AI is busy (503), in Hebrew.
+- **A deadline.** Every call the app waits on (a deal analysis, the objection deck, answers for a niche) finishes within 110 seconds, waits and retries included, so it's answered before Vercel's 2-minute limit cuts the request: with the AI's answer, or with a message saying what happened (504 when it ran out of time). The Prospector's scoring runs in the background, so it gets 4 minutes a site.
+- **Answers that don't parse.** A model that refuses the JSON schema (some models and gateways don't support structured outputs) is asked again in plain JSON mode, with the schema in the instructions; an answer that comes back cut off or malformed is asked for once more. The server then checks it with Zod as always.
+- **Nothing escapes.** Every failure becomes a plain Hebrew message for the app (a rejected key, an unknown model, a rate limit, a busy service) and the provider's own error in the server log; background work that fails (a transcript, a Prospector search) is logged and never stops the server.
+
+The coach reads the timeline as you wrote it: every note, call, Zoom meeting and WhatsApp message (with the message you sent from the app), and the transcripts of the recordings.
 
 **What the AI gets.** A system prompt that sets it up as a sales coach for your funnel, then the lead's name, contact name, campaign, stage, the deal's currency, a closed deal's terms ("Deal terms: setup fee 18,000 ILS; monthly retainer 650 ILS a month; domain and hosting none", so it can spot the natural upsell), unanswered-call count, last contact and approach notes; your price history (from your other closed deals in the same currency: the median setup fee and its range, how many pay a retainer and how much, the same for hosting, and the deals in the lead's own niche; amounts only, never which business paid them); and the timeline oldest first, each entry with its date (in `APP_TIMEZONE`), its title exactly as the app shows it ("ניסיון 2: ענה ← פגישת זום"), its notes and any automatic transcript. The prompt explains the Hebrew titles, and the coach names entries by them, so "ניסיון 2" in its advice is the entry you see on the timeline. The lead's phone, email and website fields are never sent. Each entry says whether its recordings are transcribed below, still in progress or not transcribed, and the prompt tells the coach to trust a transcript over the notes (allowing for recognition mistakes), to tell the speakers apart by context, and not to guess at recordings it can't read. The notes are escaped and marked as data, so text in them can't pose as instructions. Long histories are fitted into about 150,000 characters: every note first, newest first, then the transcripts in the room left, shortened from the middle so each call's opening and ending stay.
 
@@ -164,40 +177,21 @@ The provider code is in `src/coach/providers.ts`: plain `fetch` calls, one funct
 
 ## Nothing goes out to a lead
 
-This CRM is for your eyes only. It never sends an email, a WhatsApp message, an SMS or a link to anyone: there is no email or SMS library in it, no messaging API it calls, and the WhatsApp link below can only read. The coach's "if they don't pick up" message is a draft you copy and send from your own phone. The Call, WhatsApp and Email buttons on a lead only open your phone's dialer, your WhatsApp or your mail app on that contact; nothing is filled in and nothing is sent for you.
+This CRM never sends an email, a WhatsApp message, an SMS or a link to anyone by itself: there is no email, SMS or WhatsApp library in the server, and no messaging API it calls. The WhatsApp button opens WhatsApp on your own phone or computer with a message ready (below), and you press send there. The coach's "if they don't pick up" message is a draft you copy and send from your own phone. The Call and Email buttons only open your phone's dialer or your mail app on that contact.
 
-Two tests keep it that way: `test/outbound-policy.test.ts` fails if the server gains a messaging library, calls a messaging API, or calls a WhatsApp method that can send anywhere outside the guard; `src/lib/outbound-policy.test.ts` in the frontend fails on any link that writes a message for you (`wa.me/…?text=`, `mailto:…?body=`, `sms:`).
+Two tests keep it that way: `test/outbound-policy.test.ts` fails if the server gains a messaging library (Baileys included), calls a messaging API or a method that sends; `src/lib/outbound-policy.test.ts` in the frontend fails on any link that writes a message (`mailto:…?body=`, `sms:`, and `?text=` anywhere but the one `wa.me` link in `src/lib/phone.ts`).
 
-## WhatsApp sync (read-only)
+## WhatsApp: a link with a ready message
 
-The server links to your WhatsApp the way WhatsApp Web does, as one of your linked devices, and mirrors your conversations with leads onto their timelines: one read-only entry per lead per day, shown as a chat, with voice notes downloaded and transcribed into the conversation. The AI coach and objection training read these chats like any other entry. Chats with anyone who isn't a lead are never stored; only the chat's id and its last message's id and time are kept (no text), so a lead you add later can pull in the conversation.
+WhatsApp goes from your own WhatsApp, the way it always does: the app opens `https://wa.me/<number>?text=<message>`, which WhatsApp (on a phone, the desktop app or WhatsApp Web) opens on that chat with the message typed in, for you to read, change and send. There is nothing to link, no key, and nothing on the server that can disconnect or crash. The number is the lead's, made international by the app (`defaultCountryCode` in `src/config.ts`, 972, for a number written with a leading 0).
 
-| Setting | Value |
-| --- | --- |
-| `WHATSAPP` | `on` to turn it on (off by default) |
-| `WHATSAPP_AUTH_KEY` | 32 random bytes, from `openssl rand -base64 32`. Seals the linked device's keys in the database. Keep it with your other secrets: whoever has the keys and this value can read your WhatsApp. |
-| `WHATSAPP_COUNTRY_CODE` | for lead numbers written without one: `972` turns 054… into 97254… (default 972) |
-| `WHATSAPP_HISTORY` | `full` asks your phone for all of its history when linking; `recent` for the last few months |
-| `WHATSAPP_VOICE_DAYS` | voice notes newer than this are downloaded and transcribed as they sync (default 30); older ones have a "Get and transcribe" button |
+The message is a template, picked by where the lead stands (a first approach, after a call nobody picked up, after a conversation, with the quote, a follow-up), with the contact's first name, the business and the niche filled in. The templates live in the app (`src/lib/messages.ts`) and can be edited there; edits stay on that device. When WhatsApp opens, the app logs a `whatsapp` step with the message as its text, which moves the lead to "נשלח וואטסאפ" and goes on its timeline (and from there to the coach).
 
-Then open the WhatsApp icon in the app's header, choose **Link with a QR code** (or a code typed on your phone), and on your phone go to Settings → Linked devices → Link a device. The link survives restarts. Unlinking from the app removes the server from your linked devices; mirrored conversations stay.
+**Coming from the WhatsApp sync.** Earlier versions linked the server to WhatsApp as a linked device, through Baileys, an unofficial WhatsApp Web client, to mirror chats read-only. It's gone: an unofficial client gets disconnected, could take the server down with it, and isn't allowed by WhatsApp's terms. To finish the move:
 
-**How it can never send.** WhatsApp has no official API for reading your own chats, so this uses [Baileys](https://github.com/WhiskeySockets/Baileys), an open-source WhatsApp Web client, behind a guard in `src/whatsapp/guard.ts`. Four independent layers each stop a message on their own:
-
-1. **Config.** The device is created invisible (never "online", so your phone keeps its notifications) and keeps no copy of messages, so it has nothing to resend.
-2. **Method lock.** Every socket method that can send or change something (`sendMessage`, `readMessages`, `sendPresenceUpdate`, `chatModify`, `groupParticipantsUpdate`, `updateBlockStatus`, `rejectCall`, `sendNode`, `relayMessage`, `query`…) is replaced with one that throws. The rest of the server never gets the socket, only a facade of read-only lookups and requests to your own phone.
-3. **Message lock.** Baileys passes every outgoing message through `patchMessageBeforeSending` before encrypting it. Ours throws for anything but a history request addressed to your own phone.
-4. **Wire lock.** Baileys shows each frame to its logger just before writing it. The guard checks it against an allow list and, for anything else, makes the socket report itself closed to that one write, so the frame is never encrypted or sent. Before each connection, the guard pushes a test message frame through Baileys' real write path and checks that it stopped it; if it can't prove that (a future Baileys version, say), WhatsApp stays off.
-
-The allow list is what any linked device needs to stay connected: the handshake, keep-alive pings, encryption keys, acknowledgements, delivery receipts (grey ticks, which WhatsApp Web sends too), decryption retries, and history requests to your own phone. Everything else is blocked: messages of any kind, read and played receipts (blue ticks), presence (online, typing, recording), calls, group changes, blocking, profile and privacy changes, and chat settings. Baileys sends a few harmless ones on its own (an "online" presence when your profile name syncs); those are held back quietly. An attempt to reach a lead stops the sync until you reconnect it, and the WhatsApp panel lists what the guard held back. `test/whatsapp-guard.test.ts` runs the real Baileys socket against a local WebSocket server and checks, frame by frame, what reaches it. Baileys is pinned to an exact version in `package.json`: upgrade it on purpose, and run `npm test` before deploying the upgrade.
-
-**Matching chats to leads.** By phone number: the lead's number as typed (054-123-4567, +972…, 00972…) against the chat's. WhatsApp now hides some numbers behind privacy ids (`…@lid`); their phone numbers come from the ids WhatsApp sends alongside and from its own mapping. Two leads with the same number both get the chat. A new lead with an existing chat gets its recent history right away, and **Earlier WhatsApp messages** on a lead's timeline asks your phone for 50 more each time. Your phone has to be online to answer.
-
-**Good to know.**
-- WhatsApp's terms don't allow unofficial clients. Reading only (no messages, no automation toward contacts) keeps the risk low, but an account can still be restricted.
-- Only one copy of the server can hold the link; a second one disconnects the first.
-- It's an extra linked device, separate from any WhatsApp bot on the same number. Messages your bot sends to a lead appear as yours ("Me"), because they come from your number.
-- Edits show as edited. A message deleted for everyone stays as "This message was deleted" without its text, and a deleted voice note's recording is removed too.
+- Remove `WHATSAPP`, `WHATSAPP_AUTH_KEY`, `WHATSAPP_HISTORY` and `WHATSAPP_VOICE_DAYS` from the host's environment (the server's log reminds you while `WHATSAPP` or `WHATSAPP_AUTH_KEY` is set). `WHATSAPP_COUNTRY_CODE` is still read when `COUNTRY_CODE` isn't set.
+- On your phone, remove the server from WhatsApp → Settings → Linked devices.
+- Chats already mirrored stay on the leads' timelines as they were. The `whatsapp_chats` and `whatsapp_auth` collections are no longer used and can be dropped (`whatsapp_auth` held the linked device's sealed keys).
 
 ## Objection training
 
@@ -246,7 +240,7 @@ Answers are stored per niche and card (`objection_variants`) and replaced when t
 
 ## The Prospector: finding new leads
 
-The Prospector page finds local businesses by niche and area ("מוסכים" in "עפולה"), checks each one's website, and scores how much it needs a new one, from 1 to 5. You pick the 4s and 5s and import them: they become leads at Cold Call, in the pool the Daily 10 is drawn from.
+The Prospector page finds local businesses by niche and area ("מוסכים" in "עפולה"), checks each one's website, and scores how much it needs a new one, from 1 to 5. You pick the 4s and 5s and import them: they become new leads, in the pool the Daily 10 is drawn from.
 
 **How a search runs** (`src/prospector/`, in the background, so you can leave the page):
 
@@ -271,7 +265,7 @@ The Prospector page finds local businesses by niche and area ("מוסכים" in 
 | `PROSPECTOR_AI_MODEL` | optional: another model for scoring, such as a cheaper one, from the same provider |
 | `PROSPECTOR_RETENTION_DAYS` | how long search results are kept, 1 to 30 (default 30). Imported leads stay. |
 | `PROSPECTOR_LANGUAGE`, `PROSPECTOR_REGION` | the language of names and categories from Google (`he`) and the country searched (`IL`) |
-| `WHATSAPP_COUNTRY_CODE` | also used to match phone numbers against your leads (default 972) |
+| `COUNTRY_CODE` | for numbers written without one, also to match businesses against your leads: `972` reads 054… as 97254… (default 972) |
 
 **When SerpApi runs out: the backup.** With both keys, SerpApi searches first, and Google Places takes over by itself whenever SerpApi can't: its month's searches are used up, its key is refused, it's down or slow, or it found nothing. It happens mid-search too: if SerpApi runs out on the second page, Google Places fills in the rest, and since both read the same Google Maps listings (the same place ids), no business is added twice. The search page says so in one quiet line ("נגמרו החיפושים בחבילת SerpApi החודש. את שאר העסקים מצא Google Places."), and the search records which provider found its businesses (`provider`, `fallbackFrom`, `notice`).
 
@@ -342,21 +336,20 @@ When this server finds a frontend build at `FRONTEND_DIST` (default `../dist`), 
    | `VITE_API_URL` | `/api` |
    | `AI_PROVIDER`, `AI_API_KEY` | to turn on the AI coach |
    | `TRANSCRIBE_API_KEY`, `TRANSCRIBE_LANGUAGE` | an OpenAI key and `he`, to transcribe recordings |
-   | `WHATSAPP`, `WHATSAPP_AUTH_KEY` | `on` and a key from `openssl rand -base64 32`, to mirror WhatsApp chats with leads |
    | `GOOGLE_PLACES_API_KEY` | to turn on the Prospector |
-   | `MEDIA_STORAGE` | `s3`, with `S3_BUCKET`, `S3_REGION`, `S3_ACCESS_KEY_ID` and `S3_SECRET_ACCESS_KEY`, because Render's disk doesn't survive a deploy |
+   | `MEDIA_STORAGE` | `s3`, with `S3_BUCKET`, `S3_REGION`, `S3_ACCESS_KEY_ID` and `S3_SECRET_ACCESS_KEY`, because Render's disk doesn't survive a deploy. On a host with a persistent disk (a Render disk, a VPS), keep `local` and set `MEDIA_PERSISTENT_DISK=on`; without either, the server logs a warning and the app says a new recording will be gone after the next deploy. |
 
-4. Deploy and open the service URL: it opens on the dashboard.
+   Leave out `STORAGE` and the `WHATSAPP…` settings of earlier versions: they're no longer read.
+
+4. Deploy and open the service URL: it opens on the home screen. The deploy log shows `MongoDB: connected to the "…" database, N leads stored.`: the same number on every deploy is the sign that nothing was lost.
 
 `--include=dev` matters: with `NODE_ENV=production`, npm skips devDependencies, and the build needs TypeScript, Vite and the Prisma CLI. Railway and Fly work the same way.
 
 Render's native Node runtime has no Chrome, so leave `PROSPECTOR_CHROME_PATH` empty there (websites are judged from their HTML, without screenshots), or deploy with a Docker image that installs Chromium and point the variable at it.
 
-The WhatsApp sync works best with the server running all the time. A free Render instance sleeps when idle: messages that arrived meanwhile are picked up when it wakes, but a server that is rarely up can miss some, and WhatsApp unlinks devices that stay away too long. Run one instance only: a second copy of the server would take the link from the first.
-
 ## Deploy: the app on Vercel, the server on Render
 
-Vercel can host the app's pages but not this server: the WhatsApp sync, the transcript queue and Prospector searches keep working between requests, and recordings are larger than a Vercel Function accepts (4.5 MB). So the server runs on Render (Railway and Fly work too), and `vercel.json` at the repository root has Vercel forward every `/api` request to it. To the browser it's one site, so it needs no CORS.
+Vercel can host the app's pages but not this server: the transcript queue and Prospector searches keep working between requests, and recordings are larger than a Vercel Function accepts (4.5 MB). So the server runs on Render (Railway and Fly work too), and `vercel.json` at the repository root has Vercel forward every `/api` request to it. To the browser it's one site, so it needs no CORS.
 
 1. Push the repository to GitHub (a private repository). The `.gitignore` files keep `node_modules`, builds and both `.env` files out.
 2. Create the Atlas cluster above.
@@ -367,7 +360,9 @@ Vercel can host the app's pages but not this server: the WhatsApp sync, the tran
    - Health check path: `/api/health`
    - Environment: the variables from [the one-service deploy](#deploy-one-service-on-render) except `VITE_API_URL`. `CORS_ORIGINS` isn't needed: requests reach the server through Vercel, and nothing checks where they come from.
 4. `vercel.json` forwards `/api` to `https://lead-nkeo.onrender.com`. If your Render address is different, change it there, in both places (the rewrite and `connect-src`), and push.
-5. On Vercel, import the repository and leave the root directory as it is (it detects Vite). `VITE_API_URL` is `/api` there without setting it: `vite.config.ts` makes it so on Vercel builds, since `vercel.json` forwards `/api` to the server, so a deployment never comes out as the browser-only preview. Deploy and open the address: it opens on the dashboard.
+5. On Vercel, import the repository and leave the root directory as it is (it detects Vite). `VITE_API_URL` is `/api` there without setting it: `vite.config.ts` makes it so on Vercel builds, since `vercel.json` forwards `/api` to the server, so a deployment never comes out as the browser-only preview. Deploy and open the address: it opens on the home screen.
+
+Deploy the server first when both change: an app from a newer version may call a route an older server doesn't have yet.
 
 Use `/api`, not the Render address, for `VITE_API_URL`: through Vercel the browser sees one site. With the Render address the server would also need `CORS_ORIGINS` set to the Vercel address. (`connect-src` lists the Render address too, so that setup isn't blocked outright.) After changing `VITE_API_URL`, redeploy on Vercel: Vite writes it into the build.
 
@@ -379,7 +374,7 @@ The app installs on a phone from the same address (`public/manifest.webmanifest`
 
 ## No sign-in
 
-This is a personal CRM, so there is no account, password, code or session: the app opens straight on the dashboard, and every `/api` route answers whoever calls it. That also means anyone who has the app's address (or the server's) can read and change the leads, play the recordings, read the mirrored WhatsApp chats, and run the AI coach, transcripts and Prospector searches on your API keys. Keep the address to yourself.
+This is a personal CRM, so there is no account, password, code or session: the app opens straight on the home screen, and every `/api` route answers whoever calls it. That also means anyone who has the app's address (or the server's) can read and change the leads, export them, play the recordings, and run the AI coach, transcripts and Prospector searches on your API keys. Keep the address to yourself.
 
 What limits a stranger: every IP is capped at 1,500 requests per 15 minutes, the coach at 40 calls an hour (deck refreshes at 10), and Prospector searches at 15 an hour.
 
@@ -394,7 +389,6 @@ Coming from the version with sign-in: `ADMIN_EMAIL`, `ADMIN_PASSWORD_HASH`, `SES
 - **AI.** Only the fields listed under [The AI sales coach](#the-ai-sales-coach) leave the server, the key stays on the server, and the coach route is limited to 40 calls an hour (deck refreshes to 10).
 - **Outbound.** Nothing is ever sent to a lead; see [Nothing goes out to a lead](#nothing-goes-out-to-a-lead).
 - **Prospector.** Website checks only read, through a GET-only fetcher and proxy that refuse private and internal addresses (so a business's listing can't point the server at itself or your network), with size and time limits. Searches are limited to 15 an hour.
-- **WhatsApp keys.** The linked device's credentials and keys are sealed with AES-256-GCM under `WHATSAPP_AUTH_KEY`, each bound to its own id, so the database alone can't be used to read your WhatsApp. Download details for voice notes stay on the server; the browser only learns whether it can ask for one.
 - **Transcripts.** Recordings are sent to OpenAI (or your `TRANSCRIBE_BASE_URL`) to be transcribed; leave the key empty if they must stay on your server. ffmpeg only ever processes uploaded recordings, in a temporary folder that is deleted afterwards.
 - **Headers.** Helmet sets a Content Security Policy, HSTS (production), `nosniff` and frame blocking. API responses are `Cache-Control: no-store`.
 - **Errors.** Clients get a plain message, and stack traces stay in the server log. Request logs never include bodies.
@@ -407,11 +401,11 @@ All routes are under `/api` and speak JSON (uploads are multipart). None needs a
 | Method | Path | Body | Returns |
 | --- | --- | --- | --- |
 | GET | `/health` | | `{ "status": "ok" }` after pinging the database |
-| GET | `/features` | | `{ coach, media, transcription, whatsapp, prospector }`: what is turned on, or why it is off |
+| GET | `/features` | | `{ coach, media, transcription, prospector }`: what is turned on, or why it is off. `media.persistent` says whether recordings survive a deploy. |
 | GET | `/leads` | | `Lead[]`, newest first |
 | POST | `/leads` | `Lead`, with optional `notes: [{ id, body, createdAt }]` | 201 `Lead` (409 if the id exists); the notes go on its timeline |
 | POST | `/leads/bulk` | `{ leads: Lead[] }`, up to 500 | 201 `{ created: Lead[], skippedIds: string[] }` |
-| POST | `/leads/import-json` | the array itself: `[{ name, phone, source?, niche?, notes? }]`, up to 1,000 | 201 `{ created: Lead[], skipped: [{ index, name, phone, reason, message, leadId?, firstIndex? }], ignoredFields }`; see [Importing JSON](#importing-json) |
+| POST | `/leads/import-json?name=&phone=&niche=` | the array itself, `[{ name, phone, … }]` in any of the usual field names, or `{ data: [ … ] }`; up to 1,000. The query optionally names the key each of those three fields comes from | 201 `{ created: Lead[], skipped: [{ index, name, phone, reason, message, leadId?, firstIndex? }], ignoredFields }`; see [Importing JSON](#importing-json) |
 | POST | `/leads/bulk-delete` | `{ ids: string[] }`, up to 500 | 204, with their timelines, recordings and reports |
 | PATCH | `/leads/:id` | changed details only; `deal: { setupFee?, monthlyRetainer?, hostingYearly? }` changes just the amounts sent | `Lead` (409 for amounts or a currency before the deal is closed) |
 | POST | `/leads/:id/actions` | `{ id, type, from, body?, channel?, at? }` | `Lead` after the step, which is also logged on the timeline (409 when it isn't allowed). `at`: when it happened, for a step logged on a phone without a connection and sent later; kept within the last week, never before the lead's latest step or after now. The same `id` twice is applied once |
@@ -420,7 +414,7 @@ All routes are under `/api` and speak JSON (uploads are multipart). None needs a
 | GET | `/leads/:id/timeline` | | `{ interactions, media, coaching }`: entries and recordings newest first, and the latest report |
 | POST | `/leads/:id/interactions` | `{ id, kind: note \| whatsapp \| email, body, at? }` | 201 `Interaction` |
 | PATCH | `/leads/:id/interactions/:interactionId` | `{ body, expectedUpdatedAt? }` | `Interaction` (409 if it changed after `expectedUpdatedAt`) |
-| DELETE | `/leads/:id/interactions/:interactionId` | | 204 (409 for an entry that records a step, or a mirrored WhatsApp chat) |
+| DELETE | `/leads/:id/interactions/:interactionId` | | 204 (409 for an entry that records a step, or a WhatsApp chat mirrored by an earlier version) |
 | POST | `/leads/:id/media` | multipart: `file`, `interactionId?` | 201 `Media`, its transcript queued (413 too large, 415 not a recording) |
 | GET | `/leads/:id/media` | | `Media[]` with each transcript's progress |
 | POST | `/media/:mediaId/transcribe` | | 202 `Media`, transcribed again from scratch (409 while one is running, 503 when transcripts are off) |
@@ -429,12 +423,6 @@ All routes are under `/api` and speak JSON (uploads are multipart). None needs a
 | POST | `/leads/:id/coaching` | `{ language?: auto \| he \| en }` | 201 `CoachingReport` (503 when the coach is off, 502 when the AI fails) |
 | GET | `/daily` | | `{ date, startsAt, endsAt, leadIds, poolSize, quota }`, drawn on the first request of the day |
 | GET | `/dashboard` | | `{ pulses }`: for each lead in play, its last timeline entry and last Zoom (time, kind, outcome) and the gist of its latest deal analysis (health, next contact and in how many days, first step, recommended price). No contact details. |
-| GET | `/whatsapp` | | the link's state, the guard's report and the sync's progress (or `{ enabled: false, reason }`) |
-| POST | `/whatsapp/link` | `{ phone? }` | starts linking: a QR code, or a pairing code for `phone` (409 when already linked) |
-| POST | `/whatsapp/reconnect` | | after the guard or WhatsApp stopped the link |
-| POST | `/whatsapp/unlink` | | removes this server from your linked devices; mirrored chats stay |
-| POST | `/leads/:id/whatsapp/history` | | 202: asked your phone for older messages with this lead (409 with the reason when it can't) |
-| POST | `/leads/:id/whatsapp/voice/:messageId` | | 202: downloads and transcribes an older voice note |
 | GET | `/training` | | `{ run, cards }`: the objection deck and the analysis that built it |
 | POST | `/training/generate` | `{ language?: auto \| he \| en }` | 201 `{ run, cards }` (503 without the AI coach, 409 with nothing to learn from yet) |
 | POST | `/training/cards/:id/review` | `{ grade: 1-4, at? }` | the card with its next review. `at`: when you answered (practice done offline); the same answer with the same `at` counts once |
@@ -455,17 +443,28 @@ The frontend creates ids (UUIDs) and timestamps, so an item shows up at once and
 
 ### Importing JSON
 
-`POST /api/leads/import-json` takes leads pasted in the app as a JSON array:
+`POST /api/leads/import-json` takes leads pasted or opened in the app as JSON: the array itself, or the list an export wraps it in (`{ "data": [ … ] }`, `{ "results": [ … ] }`):
 
 ```json
 [
-  { "name": "יוסי שיפוצים", "phone": "054-1234567", "source": "קמפיין פייסבוק", "niche": "קבלני שיפוצים", "notes": "ביקש לחזור אליו אחרי החגים" }
+  { "name": "יוסי שיפוצים", "phone": "054-1234567", "source": "קמפיין פייסבוק", "niche": "קבלני שיפוצים", "notes": "ביקש לחזור אליו אחרי החגים" },
+  { "title": "מספרת אליהו", "phone": "+972 50-909-4047", "categoryName": "מספרה", "street": "בית וגן 42", "city": "ירושלים", "totalScore": 4.8, "reviewsCount": 157 }
 ]
 ```
 
-- **Fields.** `name` and `phone` are required. `niche` becomes the lead's `campaign` (which the app reads as its niche), and `source` and `notes` (text, or a list of lines) its first timeline note: `מקור: קמפיין פייסבוק` and the notes under it. Keys are read in any letter case, and in Hebrew too (שם, טלפון, מקור, נישה, הערות). Other fields aren't saved and come back in `ignoredFields`. New leads start at Cold Call with the call channel, so they join the Daily 10 pool. A value longer than a lead allows is shortened (a name to 120 characters, a niche to 60, the note to 5,000).
+- **Fields.** Every export names them its own way (a Yellow Pages or Google Maps scrape, another CRM), so each is found by any of its usual names, in any letter case, with or without `_`, `-`, `.` or spaces, in English or Hebrew (the full list is `ALIASES` in `src/leads/json-import.ts`), and one level down too (`{ "contact": { "phone": … } }`):
+  - the business, required: `businessName`, `company`, `name`, `title`, `label` (שם העסק, שם), in that order. Next to a business or company name, a plain `name` is the contact person.
+  - the phone, required: `phone`, `telephone`, `mobile`, `phone_number`, `tel` and the like (טלפון, נייד), also a list or an object of numbers. The lead gets the first valid one; the others go in the note.
+  - the niche: `niche`, `category`, `cat`, `type` (נישה, תחום, קטגוריה), or the first of a list. It becomes the lead's `campaign`, which the app reads as its niche.
+  - **A key that isn't one of those names** is read by what's in it (`FUZZY`), after every exact name: `business_phone`, `Phone 2`, `whatsappNumber` and `טלפון נוסף` are phones, `contactEmail` an email, `mainCategory`, `businessType` and `סוג העסק` niches, `name_he`, `storeName` and `שם העסק באנגלית` business names, `ownerFullName` and `בעל העסק` the contact person. Keys that only look the part are left alone: a fax, an image's URL, a job title, a place's id, `countryCode`. A guess is taken only when its value reads as that field, and never a bare number for a name or a niche.
+  - **A phone by its value.** An item with no phone under any key gets one from a value written like a number (`054-1234567`, `03 123 4567`, `+972…`, 9 to 15 digits), never from a key that says fax, zip, id or date.
+  - **Keys chosen by hand.** `?name=title&phone=mobile&niche=category` (any key the items have, or `contact.phone` one level down) is read first for that field, and for that field only; where it's empty in an item, the automatic choice fills in. The app's **שינוי השדות שזוהו** sends it, with every key in the file and an example of each to choose from.
+  - `email`, `website` and the contact person go on the lead when they're valid (an invalid one goes in the note, so it never costs the lead).
+  - the address (`address`, `location`, or `street` and `city`, also as an object), `source`, the rating and review count, the listing's `url`, `description` and `notes` make the lead's first timeline note, which always starts `יובא מקובץ JSON`.
+
+  Fields with something in them that's not read come back in `ignoredFields`. Every new lead is saved in MongoDB at the outreach stage with no steps, which the app shows as "חדש", with the call channel, so it joins the Daily 10 pool. A value longer than a lead allows is shortened (a name to 120 characters, a niche to 60, the note to 5,000).
 - **Phone numbers.** Each is read as international digits, so 054-1234567, 0541234567, +972 54-123-4567 and "+972 054…" are one number, and saved the way the app shows numbers (054-123-4567). An Israeli number must have an Israeli length; anything else that isn't a phone number is skipped.
-- **No duplicates.** Before the insert, the route reads every lead's number from the database (`phones()` in the stores: only `id`, `name` and `phone`), and filters out items whose number is already on a lead, in whatever format it was saved (`reason: "exists"`, with `leadId`) or came earlier in the same request (`"repeated"`, with `firstIndex`). Items without a name, a phone, or that aren't objects are skipped as `"invalid"` or `"no-phone"`. What's left is written with one `insertMany` (Prisma's `createMany`), notes included. Sending the same list twice saves nothing the second time.
+- **No duplicates.** Before the insert, the route reads every lead's number from the database (`phones()` in the stores: only `id`, `name` and `phone`), and filters out items whose number is already on a lead, in whatever format it was saved (`reason: "exists"`, with `leadId`) or came earlier in the same request (`"repeated"`, with `firstIndex`). Items without a business name, a phone, or that aren't objects are skipped as `"invalid"` or `"no-phone"`. What's left is written with one `insertMany` (Prisma's `createMany`), notes included. Sending the same list twice saves nothing the second time.
 - **Limits.** Up to 1,000 items and 2 MB a request; the app sends bigger pastes in parts of up to 500 and adds up the results. The rules are plain functions in `src/leads/json-import.ts`, which the app also runs for the browser-only preview.
 
 ## Data model
@@ -475,9 +474,8 @@ The frontend creates ids (UUIDs) and timestamps, so an item shows up at once and
 - `media`: one document per recording (lead, optional timeline entry, file name, type, size, storage key, and its transcript job: status, parts, attempts, error, text, word count). The files themselves are on disk or in S3.
 - `coaching_reports`: every analysis, with the provider, model and how many entries it read. The newest one is shown, and the dashboard reads each lead's newest one for its health, next contact and price.
 - `daily_queues`: one document per day, holding the lead ids drawn for it. Each lead's outcome for the day is read from its activity, so working a lead anywhere in the app counts.
-- `interactions` also holds mirrored WhatsApp conversations: `source: "whatsapp"` and `chat`, the day's messages (sender, time, type, text, voice note recording and transcript), with `body` holding the same conversation as text for the coach. Their ids are `wa-<lead>-<day>`.
-- `whatsapp_chats`: every chat seen on the linked phone, by id, with its number and last message's id and time. Never any text.
-- `whatsapp_auth`: the linked device's credentials and keys, each sealed with `WHATSAPP_AUTH_KEY`.
+- `interactions` also keeps the WhatsApp conversations mirrored by earlier versions: `source: "whatsapp"` and `chat`, the day's messages, with `body` holding the same conversation as text for the coach. Their ids are `wa-<lead>-<day>`. Messages opened from the app now are `whatsapp` steps with the message as their text.
+- `whatsapp_chats` and `whatsapp_auth`, from the WhatsApp sync of earlier versions, are no longer read; they can be dropped.
 - `objection_cards` and `training_runs`: the objection deck (see [Objection training](#objection-training)) and each analysis that built it.
 - `objection_variants`: the deck's answers tailored to a niche, one per niche and card (unique on both).
 - `prospect_searches` and `prospects`: Prospector searches and the businesses they found, each with its website check embedded (status, site state, score, verdict, reasons, opening line, signals and screenshot key). A search records which provider found its businesses and, when the backup took over, from which one and why. Deleted after `PROSPECTOR_RETENTION_DAYS`.
@@ -486,8 +484,8 @@ The frontend creates ids (UUIDs) and timestamps, so an item shows up at once and
 
 ```
 server/
-  prisma/schema.prisma        Lead, Interaction, Media, CoachingReport, DailyQueue, WhatsAppChat, WhatsAppAuth, ObjectionCard,
-                              ObjectionVariant, TrainingRun, ProspectSearch, Prospect
+  prisma/schema.prisma        Lead, Interaction, Media, CoachingReport, DailyQueue, ObjectionCard, ObjectionVariant, TrainingRun,
+                              ProspectSearch, Prospect
   src/
     index.ts                  starts the server, shuts down cleanly on SIGTERM
     app.ts                    middleware order and routes
@@ -496,12 +494,12 @@ server/
     services.ts               opens recording storage and the AI provider from the settings
     stores/
       types.ts                store interfaces (leads, timeline, media, coaching, daily)
-      prisma.ts               MongoDB through Prisma
-      memory.ts               in-memory version, for tests and STORAGE=memory
+      prisma.ts               MongoDB through Prisma, the only store the server runs on
       legacy.ts               turns pre-timeline data into timeline entries
-      index.ts                opens the configured one
-    leads/                    routes, Zod schemas, workflow.ts (the funnel rules) and json-import.ts (pasted JSON: reading,
-                              phone numbers, skipping duplicates; shared with the app)
+      index.ts                connects to MongoDB at startup (or stops with what to fix)
+    leads/                    routes, Zod schemas, workflow.ts (the funnel rules) and json-import.ts (pasted JSON: field names
+                              and guesses, keys chosen by hand, phone numbers, skipping duplicates; shared with the app)
+    lib/phone.ts              lead numbers as international digits
     timeline/                 the lead profile: timeline, notes and messages
     media/                    Multer upload checks, local and S3 storage, playback and transcript routes
     transcription/            ffmpeg (audio, pauses, parts), the OpenAI client, the pipeline, the background queue
@@ -509,15 +507,6 @@ server/
     dashboard/                what the dashboard needs per lead: last touch and the latest analysis's gist
     training/                 the objection deck: the starter cards, prompt, schema, quote checks, spaced repetition, routes,
                               niches (niche.ts, shared with the app) and answers tailored to them (tailor.ts)
-    whatsapp/
-      guard.ts                the read-only guard: allow list, the four locks, the self-test (no Baileys import)
-      link.ts                 the connection: linking, reconnecting, unlinking, the read-only facade
-      sync.ts                 chats to timelines: matching leads, day entries, edits, voice notes, history
-      chat.ts                 WhatsApp messages as timeline lines and text
-      auth-state.ts           the linked device's keys in the database; auth-key.ts seals them
-      phone.ts                lead numbers as WhatsApp numbers
-      service.ts, index.ts    what the routes see; loads Baileys only when WHATSAPP=on
-      whatsapp.routes.ts      status, link, unlink, history and voice note routes
     prospector/
       discovery.ts            SerpApi and Google Places (New) searches, and why one failed (quota, key, down, rejected)
       fallback.ts             one provider after the other: the backup taking over, rests, SerpApi's Account API
@@ -532,9 +521,10 @@ server/
     middleware/               security headers, CORS, rate limits, errors, logging
     frontend.ts               serves the built Vite app
   scripts/migrate-timeline.ts one-time upgrade for data from before the timeline
-  test/                       API, prompt, provider, transcription, WhatsApp guard and sync, training, Prospector and outbound-policy tests
-                              (real ffmpeg, a real Baileys socket and, when it's installed, real headless Chrome against local
-                              stand-in websites; the AI, OpenAI, Google and WhatsApp's servers are stand-ins)
+  test/                       API, prompt, provider (retries, fallbacks, the queue, the deadline), transcription, JSON import,
+                              training, Prospector and outbound-policy tests (real ffmpeg and, when it's installed, real headless
+                              Chrome against local stand-in websites; the AI, OpenAI and Google are stand-ins). memory-stores.ts
+                              is the in-memory copy of the stores they run on.
 ```
 
 Routes only talk to the store interfaces, so moving to another database means writing one more file in `stores/`.

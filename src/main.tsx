@@ -7,6 +7,7 @@ import '@fontsource/ibm-plex-sans-hebrew/hebrew-600.css';
 import './index.css';
 import App from './App';
 import { applyThemePreference, readThemePreference } from './lib/theme';
+import { showQuickCopy } from './store/offline';
 
 // public/theme-init.js already did this before paint; repeat it in case that script was blocked.
 document.documentElement.lang = 'he';
@@ -15,6 +16,14 @@ applyThemePreference(readThemePreference());
 
 const root = document.getElementById('root');
 if (!root) throw new Error('Missing #root element in index.html');
+
+// The leads kept on this device are on the screen from the first frame, before the server (which may be waking
+// up) answers. Never in the way of the app starting.
+try {
+  showQuickCopy();
+} catch {
+  // No copy, or one that doesn't read: the app loads as usual
+}
 
 createRoot(root).render(
   <StrictMode>

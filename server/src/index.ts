@@ -2,16 +2,22 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { createApp } from './app.js';
 import { config } from './config.js';
-import { openCoach, openMediaStorage, openProspector, openTranscription, openWhatsApp } from './services.js';
+import { openCoach, openMediaStorage, openProspector, openTranscription } from './services.js';
 import { openStores } from './stores/index.js';
 
+// Background work (a transcript, a Prospector search, an AI call) that fails where nothing waits for it is logged,
+// never allowed to take the whole server down with it.
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled error in background work (the server keeps running):', reason);
+});
+
+// MongoDB answers before anything else starts (stores/index.ts): the server never runs without its database
 const { stores, close } = await openStores();
 const storage = openMediaStorage();
 const coach = openCoach();
 const { queue: transcription, off: transcriptionOff } = await openTranscription(stores, storage);
-const { service: whatsapp, off: whatsappOff } = await openWhatsApp(stores, storage, transcription);
 const { engine: prospector, off: prospectorOff } = await openProspector(stores, storage, coach);
-const app = createApp({ stores, storage, coach, transcription, transcriptionOff, whatsapp, whatsappOff, prospector, prospectorOff });
+const app = createApp({ stores, storage, coach, transcription, transcriptionOff, prospector, prospectorOff });
 
 const server = app.listen(config.port, () => {
   const frontend = existsSync(join(config.frontendDist, 'index.html'))
@@ -19,11 +25,10 @@ const server = app.listen(config.port, () => {
     : 'API only (no frontend build found)';
   const ai = coach ? `AI coach: ${coach.name} ${coach.model}` : 'AI coach off';
   const transcripts = transcription ? `transcripts: ${transcription.transcriber.model}` : 'transcripts off';
-  const wa = whatsapp ? `WhatsApp: read-only, ${whatsapp.status().link.state}` : 'WhatsApp off';
   const finder = prospector
     ? `Prospector: ${prospector.providerName}${prospector.backupName ? ` (backup: ${prospector.backupName})` : ''}${prospector.browser ? ' + browser' : ''}${prospector.ai ? ' + AI' : ''}`
     : 'Prospector off';
-  console.log(`Omek Leads API on http://localhost:${config.port} (${config.env}, ${frontend}, ${ai}, recordings: ${storage.kind}, ${transcripts}, ${wa}, ${finder})`);
+  console.log(`Omek Leads API on http://localhost:${config.port} (${config.env}, ${frontend}, ${ai}, recordings: ${storage.kind}, ${transcripts}, ${finder})`);
   // Transcripts that were queued or running when the server last stopped carry on, and so do searches.
   void transcription?.resume().catch((error: unknown) => console.error("Couldn't resume transcripts:", error));
   void prospector?.resume().catch((error: unknown) => console.error("Couldn't resume Prospector searches:", error));
@@ -42,7 +47,6 @@ function shutdown(signal: string) {
   console.log(`${signal} received, shutting down…`);
   // A transcript in progress stops here and starts again on the next start (its state is in the database).
   transcription?.stop();
-  whatsapp?.stop();
   // Closes the website checker's browser, if one is open
   const stopped = prospector?.stop().catch(() => {});
   server.close(() => {

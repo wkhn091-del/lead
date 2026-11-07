@@ -5,7 +5,7 @@ import { appConfig } from '../../config';
 import { cn } from '../../lib/cn';
 import { formatRelative } from '../../lib/format';
 import { EASE_OUT } from '../../lib/motion';
-import { formatPhone, telHref, whatsAppHref } from '../../lib/phone';
+import { formatPhone, telHref } from '../../lib/phone';
 import { ARCHIVED_META, OUTCOME_META, STAGE_META, toneStyle } from '../../lib/stages';
 import { websiteHref, websiteLabel } from '../../lib/website';
 import { canUndo } from '../../lib/workflow';
@@ -13,6 +13,7 @@ import { useLeadStore } from '../../store/leads';
 import { toast } from '../../store/toasts';
 import { useUi } from '../../store/ui';
 import type { ActionType } from '../../types';
+import { logWhatsApp, useWhatsAppLink } from '../pipeline/actions';
 import { buttonStyles } from '../ui/Button';
 import { CampaignTag } from '../ui/StatusBadge';
 import type { QueueItem } from './TodayView';
@@ -45,16 +46,18 @@ export function DailyCard({ item }: { item: QueueItem }) {
     const result = act(lead.id, type);
     if (!result) return;
     const message = {
-      advance: `נקבע זום עם ${lead.name}`,
+      advance: `${lead.name} עבר להצעת מחיר`,
       answered: `השיחה עם ${lead.name} תועדה`,
       no_answer: `אין מענה אצל ${lead.name}`,
       archive: `${lead.name} סומן כלא רלוונטי`,
+      whatsapp: `נשלח וואטסאפ ל-${lead.name}`,
     }[type];
     const description = {
-      advance: 'כתבו מה נאמר, כדי שהמאמן יוכל להכין את הזום.',
-      answered: 'כתבו מה נאמר. מי שענה יוצא מההגרלה היומית, וממשיכים איתו מהמשפך.',
+      advance: 'כתבו מה נאמר, כדי שהמאמן יוכל להכין את ההצעה.',
+      answered: 'כתבו מה נאמר. מי שענה יוצא מההגרלה היומית, וממשיכים איתו מלשונית הלידים.',
       no_answer: 'הליד נשאר במאגר ליום אחר.',
       archive: undefined,
+      whatsapp: 'הליד עבר ל״נשלח וואטסאפ״. אם בסוף לא נשלח, אפשר לבטל.',
     }[type];
     toast.show({
       message,
@@ -65,7 +68,7 @@ export function DailyCard({ item }: { item: QueueItem }) {
   };
 
   const tel = telHref(lead.phone);
-  const whatsApp = whatsAppHref(lead.phone);
+  const whatsApp = useWhatsAppLink(lead);
   const site = websiteHref(lead.website);
   const done = outcome !== null;
   const outcomeMeta = outcome ? OUTCOME_META[outcome.type] : null;
@@ -129,7 +132,7 @@ export function DailyCard({ item }: { item: QueueItem }) {
             <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2">
               <span style={toneStyle(outcomeMeta.tone)} className="tone-chip inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-[13px] font-medium">
                 <outcomeMeta.icon className="size-4" aria-hidden />
-                {outcome.type === 'advanced' ? 'נקבע זום' : outcomeMeta.label}
+                {outcome.type === 'advanced' ? STAGE_META.zoom.label : outcomeMeta.label}
                 <span className="font-normal opacity-80">ב-{timeOfDay.format(new Date(outcome.at))}</span>
               </span>
               {canUndo(lead, outcome.id) && (
@@ -166,7 +169,15 @@ export function DailyCard({ item }: { item: QueueItem }) {
                   </a>
                 )}
                 {whatsApp && (
-                  <a href={whatsApp} target="_blank" rel="noreferrer" className={buttonStyles({ size: 'sm', className: 'max-sm:flex-1' })}>
+                  // Opens the chat with the ready message, and logs it: the lead moves to "נשלח וואטסאפ" (with Undo)
+                  <a
+                    href={whatsApp.href}
+                    target="_blank"
+                    rel="noreferrer"
+                    title={whatsApp.message}
+                    onClick={() => logWhatsApp(lead, whatsApp.message)}
+                    className={buttonStyles({ size: 'sm', className: 'max-sm:flex-1' })}
+                  >
                     <MessageCircle className="size-4" style={{ color: 'var(--whatsapp)' }} aria-hidden />
                     וואטסאפ
                   </a>
@@ -191,8 +202,8 @@ export function DailyCard({ item }: { item: QueueItem }) {
                 </button>
               </div>
               <div className="mt-2.5 grid grid-cols-2 gap-2 sm:grid-cols-4" role="group" aria-label={`תוצאת השיחה עם ${lead.name}`}>
-                <ActionButton tone={STAGE_META.zoom.tone} strong onClick={() => run('advance')} label="נקבע זום" icon={STAGE_META.zoom.icon} />
-                <ActionButton tone={OUTCOME_META.answered.tone} onClick={() => run('answered')} label="ענה" hint="בלי זום עדיין" icon={OUTCOME_META.answered.icon} />
+                <ActionButton tone={STAGE_META.zoom.tone} strong onClick={() => run('advance')} label={STAGE_META.zoom.label} icon={STAGE_META.zoom.icon} />
+                <ActionButton tone={OUTCOME_META.answered.tone} onClick={() => run('answered')} label="ענה" hint="עוד בלי הצעה" icon={OUTCOME_META.answered.icon} />
                 <ActionButton tone={OUTCOME_META.no_answer.tone} onClick={() => run('no_answer')} label="אין מענה" icon={OUTCOME_META.no_answer.icon} />
                 <ActionButton tone={ARCHIVED_META.tone} onClick={() => run('archive')} label="לא רלוונטי" icon={ARCHIVED_META.icon} />
               </div>

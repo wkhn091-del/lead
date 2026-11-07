@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { LeadInput } from '../leads/leads.schemas.js';
 import type { LeadRecord } from '../stores/types.js';
-import { internationalDigits } from '../whatsapp/phone.js';
+import { internationalDigits } from '../lib/phone.js';
 import { domainOf, notAWebsite } from './site.js';
 import type { ProspectRecord, ProspectSearchRecord } from './types.js';
 

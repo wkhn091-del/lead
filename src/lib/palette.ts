@@ -1,5 +1,5 @@
 import type { ActionType, DailyQueue, Lead } from '../types';
-import { phoneDigits, toInternational } from './phone';
+import { phoneDigits, toInternational, whatsAppHref } from './phone';
 import { canUndo, isOpen, outcomeBetween } from './workflow';
 
 // The command palette's search and actions, kept apart from the component so they can be tested.
@@ -80,7 +80,7 @@ export function todaysCalls(daily: DailyQueue | null, leads: readonly Lead[]): Q
   });
 }
 
-export type LeadCommand = ActionType | 'undo' | 'open' | 'note' | 'coach' | 'copy-phone' | 'whatsapp-history';
+export type LeadCommand = ActionType | 'undo' | 'open' | 'note' | 'coach' | 'copy-phone';
 
 export interface LeadCommandItem {
   command: LeadCommand;
@@ -95,21 +95,31 @@ export interface LeadCommandItem {
 }
 
 /** What can be done to a lead from the palette right now, with a one-key shortcut each */
-export function leadCommands(lead: Lead, options: { whatsapp: boolean; now?: number }): LeadCommandItem[] {
+export function leadCommands(lead: Lead, options: { now?: number } = {}): LeadCommandItem[] {
   const now = options.now ?? Date.now();
   const items: LeadCommandItem[] = [];
   if (isOpen(lead)) {
-    const meeting = lead.stage === 'zoom';
+    // Each is logged as a phone call (CommandPalette.tsx); a Zoom meeting is logged from the profile
+    const quote = lead.stage === 'zoom';
     items.push(
-      { command: 'no_answer', label: meeting ? 'לא הגיע' : 'אין מענה', hint: meeting ? 'פספס את הזום' : 'נשאר במאגר', code: 'KeyN', key: 'N', group: 'log' },
-      { command: 'answered', label: meeting ? 'דיברנו, עוד לא נסגר' : 'ענה, בלי זום עדיין', code: 'KeyA', key: 'A', group: 'log' },
-      { command: 'advance', label: meeting ? 'העסקה נסגרה' : 'נקבע זום', hint: meeting ? 'מעבר לעסקה סגורה' : 'מעבר לפגישת זום', code: 'KeyZ', key: 'Z', group: 'log' },
-      { command: 'archive', label: 'לא רלוונטי', hint: 'יוצא מהמשפך', code: 'KeyX', key: 'X', group: 'log' },
+      { command: 'no_answer', label: 'אין מענה', hint: quote ? 'לא ענה לשיחה' : 'נשאר במאגר', code: 'KeyN', key: 'N', group: 'log' },
+      { command: 'answered', label: quote ? 'דיברנו, עוד לא נסגר' : 'ענה, עוד בלי הצעה', code: 'KeyA', key: 'A', group: 'log' },
+      { command: 'advance', label: quote ? 'העסקה נסגרה' : 'הצעת מחיר', hint: quote ? 'מעבר לנסגר / לקוח' : 'מעבר להצעת מחיר', code: 'KeyZ', key: 'Z', group: 'log' },
+      { command: 'archive', label: 'לא רלוונטי', hint: 'יוצא מהרשימה', code: 'KeyX', key: 'X', group: 'log' },
     );
+    if (whatsAppHref(lead.phone)) {
+      items.push({ command: 'whatsapp', label: 'שליחת וואטסאפ', hint: 'פותח את וואטסאפ עם ההודעה המוכנה', code: 'KeyS', key: 'S', group: 'log' });
+    }
   }
   const latest = lead.activity[0];
   if (latest && canUndo(lead, latest.id, now)) {
-    const names = { advanced: 'המעבר לשלב הבא', no_answer: '"אין מענה"', answered: '"ענה"', archived: '"לא רלוונטי"' } as const;
+    const names = {
+      advanced: 'המעבר לשלב הבא',
+      no_answer: '"אין מענה"',
+      answered: '"ענה"',
+      archived: '"לא רלוונטי"',
+      whatsapp: '"נשלח וואטסאפ"',
+    } as const;
     items.push({ command: 'undo', label: `ביטול ${names[latest.type]}`, hint: 'הצעד האחרון, עד 10 דקות', code: 'KeyU', key: 'U', group: 'log' });
   }
   items.push(
@@ -118,8 +128,5 @@ export function leadCommands(lead: Lead, options: { whatsapp: boolean; now?: num
     { command: 'coach', label: 'הכנה עם מאמן ה-AI', code: 'KeyP', key: 'P', group: 'lead' },
   );
   if (lead.phone.trim()) items.push({ command: 'copy-phone', label: 'העתקת מספר הטלפון', hint: lead.phone, code: 'KeyC', key: 'C', group: 'lead' });
-  if (options.whatsapp && lead.phone.trim()) {
-    items.push({ command: 'whatsapp-history', label: 'משיכת היסטוריית וואטסאפ', hint: 'מבקש מהטלפון, קריאה בלבד', code: 'KeyH', key: 'H', group: 'lead' });
-  }
   return items;
 }

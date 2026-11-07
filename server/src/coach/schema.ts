@@ -26,7 +26,7 @@ export const ANALYSIS_JSON_SCHEMA = object({
   },
   actionPlan: {
     type: 'array',
-    description: 'The plan from today to the next commitment (Cold Call: a booked Zoom; Zoom Meeting: a signed deal; Deal Closed: delivery and the upsell). 3 to 6 steps, in the order to do them.',
+    description: 'The plan from today to the next commitment (Outreach: a prospect who wants a quote; Quote: a signed deal; Client: delivery and the upsell). 3 to 6 steps, in the order to do them.',
     items: object({
       step: text('One concrete action, specific to this deal.'),
       when: text('When to do it: "today", "tomorrow morning", "the evening before the Zoom", "within two days"…'),

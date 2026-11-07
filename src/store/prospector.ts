@@ -341,7 +341,7 @@ export const useProspector = create<ProspectorState>()((set, get) => {
               ? known === 1
                 ? 'עסק אחד כבר ב-CRM (אותו טלפון או אתר), אז הוא לא נוסף שוב.'
                 : `${known} עסקים כבר ב-CRM (אותו טלפון או אתר), אז הם לא נוספו שוב.`
-              : 'הם בשלב שיחה קרה, עם ניתוח האתר בציר הזמן.',
+              : 'הם בסטטוס חדש, עם ניתוח האתר בציר הזמן.',
             duration: 7000,
             action: { label: 'לשיחות של היום', onClick: () => useUi.getState().setView('today') },
           });

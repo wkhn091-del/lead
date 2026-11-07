@@ -4,13 +4,16 @@ import { ConflictError } from '../stores/types.js';
 export const STAGES = ['cold_call', 'zoom', 'closed'] as const;
 export type Stage = (typeof STAGES)[number];
 
-/** advance and archive move the lead; no_answer and answered log a call (or meeting) at the current stage */
-export const ACTION_TYPES = ['advance', 'no_answer', 'answered', 'archive'] as const;
+/**
+ * advance and archive move the lead; no_answer and answered log a call (or meeting) at the current stage; whatsapp
+ * logs a WhatsApp message sent from the app ("נשלח וואטסאפ" on the board)
+ */
+export const ACTION_TYPES = ['advance', 'no_answer', 'answered', 'archive', 'whatsapp'] as const;
 export type ActionType = (typeof ACTION_TYPES)[number];
 
 const NEXT_STAGE: Record<Stage, Stage | null> = { cold_call: 'zoom', zoom: 'closed', closed: null };
 /** The stage names on the seller's screen (src/lib/stages.ts in the frontend) */
-const STAGE_LABEL: Record<Stage, string> = { cold_call: 'שיחה קרה', zoom: 'פגישת זום', closed: 'עסקה סגורה' };
+const STAGE_LABEL: Record<Stage, string> = { cold_call: 'פנייה', zoom: 'הצעת מחיר', closed: 'נסגר / לקוח' };
 
 /** How long a step can be undone. After that the funnel only moves forward. */
 export const UNDO_WINDOW_MS = 10 * 60 * 1000;
@@ -31,7 +34,7 @@ const ACTIVITY_LIMIT = 200;
 
 export interface ActivityRecord {
   id: string;
-  type: 'advanced' | 'no_answer' | 'answered' | 'archived';
+  type: 'advanced' | 'no_answer' | 'answered' | 'archived' | 'whatsapp';
   at: Date;
   from: Stage;
   to: Stage | null;
@@ -105,6 +108,10 @@ export function applyAction(lead: WorkflowState, action: LeadAction, now: Date):
     case 'archive':
       if (lead.stage === 'closed') throw new ConflictError('אי אפשר לסמן עסקה סגורה כלא רלוונטית.');
       return { ...lead, archivedAt: now, activity: log('archived', null) };
+    case 'whatsapp':
+      // A message sent to the lead: today's contact, like a call, but not a call attempt
+      if (lead.stage === 'closed') throw new ConflictError('העסקה הזו כבר סגורה.');
+      return { ...lead, lastAttemptAt: now, activity: log('whatsapp', null) };
   }
 }
 
@@ -131,8 +138,9 @@ export function undoAction(lead: WorkflowState, actionId: string, now: Date): Wo
 export type InteractionOutcome = 'no_answer' | 'answered' | 'held' | 'no_show';
 
 /**
- * The timeline entry a workflow step creates, with the step's id. Unless `channel` says otherwise, it is
- * a phone call while the lead is at Cold Call and a Zoom meeting once it is at Zoom Meeting.
+ * The timeline entry a workflow step creates, with the step's id: a WhatsApp message for a whatsapp step, and
+ * otherwise, unless `channel` says otherwise, a phone call while the lead is at the outreach stage and a Zoom
+ * meeting once it is at the quote stage.
  */
 export function timelineEntryFor(entry: ActivityRecord, channel?: 'call' | 'zoom') {
   const meeting = (channel ?? (entry.from === 'zoom' ? 'zoom' : 'call')) === 'zoom';
@@ -141,10 +149,11 @@ export function timelineEntryFor(entry: ActivityRecord, channel?: 'call' | 'zoom
     answered: meeting ? 'held' : 'answered',
     no_answer: meeting ? 'no_show' : 'no_answer',
     archived: null,
+    whatsapp: null,
   };
   return {
     id: entry.id,
-    kind: meeting ? ('zoom' as const) : ('call' as const),
+    kind: entry.type === 'whatsapp' ? ('whatsapp' as const) : meeting ? ('zoom' as const) : ('call' as const),
     outcome: outcome[entry.type],
     step: entry.type,
     stage: entry.from,

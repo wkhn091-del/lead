@@ -7,19 +7,31 @@
 const DB_NAME = 'omek-crm';
 const STORE = 'kv';
 
+/** How long opening the database may take before the app goes on without it (some browsers never answer) */
+const OPEN_TIMEOUT_MS = 2500;
+
 let opening: Promise<IDBDatabase | null> | null = null;
 
 function open(): Promise<IDBDatabase | null> {
   opening ??= new Promise((resolve) => {
+    // A browser that doesn't answer leaves the copy out this time, and is asked again next time
+    const timer = setTimeout(() => {
+      opening = null;
+      resolve(null);
+    }, OPEN_TIMEOUT_MS);
+    const done = (db: IDBDatabase | null) => {
+      clearTimeout(timer);
+      resolve(db);
+    };
     try {
-      if (typeof indexedDB === 'undefined') return resolve(null);
+      if (typeof indexedDB === 'undefined') return done(null);
       const request = indexedDB.open(DB_NAME, 1);
       request.onupgradeneeded = () => request.result.createObjectStore(STORE);
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => resolve(null);
-      request.onblocked = () => resolve(null);
+      request.onsuccess = () => done(request.result);
+      request.onerror = () => done(null);
+      request.onblocked = () => done(null);
     } catch {
-      resolve(null);
+      done(null);
     }
   });
   return opening;

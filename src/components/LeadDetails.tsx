@@ -1,5 +1,5 @@
 import { motion } from 'motion/react';
-import { History, LoaderCircle, Sparkles, SquarePen, Trash2, type LucideIcon } from 'lucide-react';
+import { History, LoaderCircle, MessageCircle, PencilLine, PhoneCall, Sparkles, SquarePen, Trash2, type LucideIcon } from 'lucide-react';
 import { useEffect, useId } from 'react';
 import { handleRadioKeys } from '../lib/a11y';
 import { cn } from '../lib/cn';
@@ -7,18 +7,19 @@ import { dealPhrase } from '../lib/deal';
 import { formatDate } from '../lib/format';
 import { readLanguage } from '../lib/language';
 import { SPRING } from '../lib/motion';
-import { ARCHIVED_META, OUTCOME_META, STAGE_META } from '../lib/stages';
+import { ARCHIVED_META, STAGE_META } from '../lib/stages';
 import { isOpen, nextStage } from '../lib/workflow';
 import { useLeadStore } from '../store/leads';
 import { useTimeline } from '../store/timeline';
 import { toast } from '../store/toasts';
 import { useUi, type ProfileTab } from '../store/ui';
 import type { ActionType, Lead } from '../types';
+import { logWhatsApp, useWhatsAppLink } from './pipeline/actions';
 import { CoachPanel } from './profile/CoachPanel';
 import { DetailsPanel } from './profile/DetailsPanel';
 import { TimelinePanel } from './profile/TimelinePanel';
 import { StageStepper } from './StageStepper';
-import { Button } from './ui/Button';
+import { Button, buttonStyles } from './ui/Button';
 
 interface LeadDetailsProps {
   lead: Lead;
@@ -49,20 +50,23 @@ export function LeadDetails({ lead, onDeleted }: LeadDetailsProps) {
     void load(lead.id, Boolean(useTimeline.getState().profiles[lead.id]));
   }, [lead.id, load]);
 
+  const openCallLog = useUi((s) => s.openCallLog);
+  const openWhatsApp = useUi((s) => s.openWhatsApp);
   const next = nextStage(lead.stage);
   const open = isOpen(lead);
   const deal = dealPhrase(lead.deal, lead.currency);
+  const whatsApp = useWhatsAppLink(lead);
+  const NextIcon = next ? STAGE_META[next].icon : null;
 
-  const run = (type: ActionType) => {
-    const result = act(lead.id, type);
+  const run = (type: Extract<ActionType, 'advance' | 'archive'>) => {
+    // Logged as a phone call; a Zoom meeting is logged from the timeline, with its own outcome
+    const result = act(lead.id, type, { channel: 'call' });
     if (!result) return;
     const closing = type === 'advance' && next === 'closed';
     // The deal's amounts are in the Details tab, which starts on the setup fee of a deal that just closed.
     if (closing) setTab('details');
     const message = {
-      advance: closing ? 'העסקה נסגרה' : next ? `עבר לשלב ${STAGE_META[next].label}` : '',
-      answered: 'השיחה תועדה',
-      no_answer: 'תועד: אין מענה',
+      advance: closing ? 'העסקה נסגרה' : next ? `עבר ל${STAGE_META[next].label}` : '',
       archive: 'סומן כלא רלוונטי',
     }[type];
     toast.show({
@@ -97,17 +101,36 @@ export function LeadDetails({ lead, onDeleted }: LeadDetailsProps) {
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <StageStepper lead={lead} />
         <div className="flex flex-wrap gap-2">
-          {open && (
+          {open && NextIcon && (
+            <Button variant="primary" onClick={() => run('advance')}>
+              <NextIcon className="size-4" aria-hidden />
+              {STAGE_META[lead.stage].next}
+            </Button>
+          )}
+          {!lead.archivedAt && (
             <>
-              {next && (
-                <Button variant="primary" onClick={() => run('advance')}>
-                  {STAGE_META[lead.stage].next}
-                </Button>
-              )}
-              <Button onClick={() => run('no_answer')}>
-                <OUTCOME_META.no_answer.icon className="size-4" style={{ color: OUTCOME_META.no_answer.tone }} aria-hidden />
-                אין מענה
+              <Button onClick={() => openCallLog(lead.id)}>
+                <PhoneCall className="size-4" style={{ color: 'var(--st-answered)' }} aria-hidden />
+                תעד שיחה
               </Button>
+              {whatsApp && (
+                <span className="inline-flex">
+                  <a
+                    href={whatsApp.href}
+                    target="_blank"
+                    rel="noreferrer"
+                    onClick={() => logWhatsApp(lead, whatsApp.message)}
+                    title={whatsApp.message}
+                    className={buttonStyles({ className: 'rounded-e-none' })}
+                  >
+                    <MessageCircle className="size-4" style={{ color: 'var(--whatsapp)' }} aria-hidden />
+                    שלח וואטסאפ
+                  </a>
+                  <Button aria-label="בחירת הודעה אחרת לוואטסאפ" title="בחירת הודעה אחרת" className="-ms-px rounded-s-none px-3" onClick={() => openWhatsApp(lead.id)}>
+                    <PencilLine className="size-4" aria-hidden />
+                  </Button>
+                </span>
+              )}
             </>
           )}
           <Button onClick={analyzeDeal} aria-busy={analyzing || undefined} title="תוכנית פעולה, תמחור מומלץ והתנגדויות צפויות, מתוך כל ציר הזמן">

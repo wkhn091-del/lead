@@ -119,16 +119,19 @@ export function SyncStatus() {
 }
 
 const STEP_LABEL = (op: Extract<OutboxOp, { kind: 'act' }>): string => {
-  const meeting = op.action.from === 'zoom';
+  const quote = op.action.from === 'zoom';
+  const meeting = (op.details.channel ?? (quote ? 'zoom' : 'call')) === 'zoom';
   switch (op.action.type) {
     case 'advance':
-      return meeting ? 'העסקה נסגרה' : 'נקבע זום';
+      return quote ? 'נסגר / לקוח' : 'הצעת מחיר';
     case 'no_answer':
-      return meeting ? 'לא הגיע לזום' : 'אין מענה';
+      return meeting ? 'לא הגיע לפגישה' : 'אין מענה';
     case 'answered':
       return meeting ? 'פגישה התקיימה' : 'שיחה';
     case 'archive':
       return 'סומן כלא רלוונטי';
+    case 'whatsapp':
+      return 'נשלח וואטסאפ';
   }
 };
 

@@ -32,6 +32,8 @@ enum ActivityType {
   no_answer
   archived
   answered
+  // A WhatsApp message sent from the app
+  whatsapp
 }
 
 enum InteractionKind {
@@ -56,7 +58,7 @@ enum MediaKind {
 
 /// Where a timeline entry came from, when it wasn't typed in the app
 enum InteractionSource {
-  /// Mirrored, read-only, from the linked WhatsApp account (src/whatsapp)
+  /// Mirrored, read-only, by the earlier WhatsApp sync (kept as it was)
   whatsapp
 }
 
@@ -372,33 +374,6 @@ model TrainingRun {
 
   @@index([createdAt])
   @@map("training_runs")
-}
-
-/// Chats seen on the linked WhatsApp account. Only the chat's id, number and last message's id and time are kept
-/// (never its text), so a lead added later can ask your phone for the conversation.
-model WhatsAppChat {
-  /// The chat as WhatsApp addresses it: 972541234567@s.whatsapp.net, or a privacy id ending in @lid
-  id         String   @id @map("_id")
-  /// International digits, when known
-  phone      String?
-  lastId     String
-  lastFromMe Boolean
-  lastAt     DateTime
-  updatedAt  DateTime @updatedAt
-
-  @@index([phone])
-  @@map("whatsapp_chats")
-}
-
-/// The linked device's credentials and encryption keys, each sealed with WHATSAPP_AUTH_KEY (AES-256-GCM).
-/// Deleting them unlinks this server.
-model WhatsAppAuth {
-  /// "creds", or a key's type and id
-  id        String   @id @map("_id")
-  value     String
-  updatedAt DateTime @updatedAt
-
-  @@map("whatsapp_auth")
 }
 
 enum ProspectSearchStatus {

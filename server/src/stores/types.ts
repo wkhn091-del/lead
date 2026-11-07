@@ -36,7 +36,7 @@ export type ChatLineType =
   | 'call'
   | 'other';
 
-/** One message of a WhatsApp conversation mirrored onto the timeline (src/whatsapp) */
+/** One message of a WhatsApp conversation mirrored onto the timeline by the earlier WhatsApp sync (kept as it was) */
 export interface ChatLine {
   /** WhatsApp's id for the message */
   id: string;
@@ -72,7 +72,7 @@ export interface InteractionRecord {
   stage: Stage;
   stageTo: Stage | null;
   at: Date;
-  /** Null for entries logged in the app; 'whatsapp' for a conversation mirrored from WhatsApp (read-only) */
+  /** Null for entries logged in the app; 'whatsapp' for a conversation the earlier WhatsApp sync mirrored (read-only) */
   source: 'whatsapp' | null;
   /** The mirrored conversation, oldest message first (empty for everything else) */
   chat: ChatLine[];
@@ -139,7 +139,7 @@ export interface PoolCandidate {
 /** A change to a lead's details, with the deal's amounts already merged into a whole set */
 export type LeadUpdate = Omit<LeadPatch, 'deal'> & { deal?: DealTerms };
 
-/** Data access for leads. Production uses the Prisma store; tests and STORAGE=memory use the in-memory one. */
+/** Data access for leads: MongoDB through Prisma (the tests also run on an in-memory copy, test/memory-stores.ts). */
 export interface LeadStore {
   list(): Promise<LeadRecord[]>;
   get(id: string): Promise<LeadRecord | null>;
@@ -163,13 +163,6 @@ export interface LeadStore {
 export type NewInteraction = Omit<InteractionRecord, 'updatedAt' | 'source' | 'chat'> &
   Partial<Pick<InteractionRecord, 'source' | 'chat'>>;
 
-/** A mirrored conversation's new state. `create` is used when the entry doesn't exist yet. */
-export interface ChatWrite {
-  create: NewInteraction;
-  chat: ChatLine[];
-  body: string;
-  at: Date;
-}
 export type InteractionChange = Partial<Pick<InteractionRecord, 'body' | 'kind' | 'outcome' | 'step' | 'stageTo'>>;
 
 export interface InteractionStore {
@@ -191,15 +184,6 @@ export interface InteractionStore {
   appendBody(leadId: string, id: string, text: string): Promise<InteractionRecord | null>;
   remove(leadId: string, id: string): Promise<void>;
   removeForLeads(leadIds: string[]): Promise<void>;
-  /**
-   * Creates or rewrites a mirrored conversation. `change` gets the entry as it is now (null when there is
-   * none yet) and returns its new state, or null to leave it; it runs again if another write got in first.
-   */
-  writeChat(leadId: string, id: string, change: (current: InteractionRecord | null) => ChatWrite | null): Promise<InteractionRecord | null>;
-  /** The mirrored entry holding a WhatsApp message */
-  findChatEntry(leadId: string, messageId: string): Promise<InteractionRecord | null>;
-  /** The lead's oldest mirrored conversation */
-  oldestChat(leadId: string): Promise<InteractionRecord | null>;
   /** For the dashboard: each lead's newest entry, and its newest Zoom meeting. Leads without entries are left out. */
   latestByLead(leadIds: string[]): Promise<Map<string, LatestEntries>>;
 }
@@ -241,30 +225,6 @@ export interface DailyStore {
   create(date: string, leadIds: string[]): Promise<boolean>;
   /** False when the queue changed since `version` was read */
   extend(date: string, version: number, leadIds: string[]): Promise<boolean>;
-}
-
-/** A chat seen on the linked WhatsApp account: ids and times only, never text */
-export interface WhatsAppChatRecord {
-  /** How WhatsApp addresses the chat: a phone number or a privacy id (…@lid) */
-  jid: string;
-  /** International digits, when known */
-  phone: string | null;
-  lastId: string;
-  lastFromMe: boolean;
-  lastAt: Date;
-}
-
-export interface WhatsAppStore {
-  /** Saves chats, keeping each one's newest last message */
-  saveChats(chats: WhatsAppChatRecord[]): Promise<void>;
-  /** Newest first */
-  findChatsByPhone(phones: string[]): Promise<WhatsAppChatRecord[]>;
-  /** Sealed values of the linked device's credentials and keys, by id */
-  readAuth(ids: string[]): Promise<Map<string, string>>;
-  /** A null value deletes the key */
-  writeAuth(entries: { id: string; value: string | null }[]): Promise<void>;
-  /** Forgets the linked device entirely */
-  clearAuth(): Promise<void>;
 }
 
 export const OBJECTION_CATEGORIES = ['price', 'timing', 'trust', 'need', 'authority', 'competition', 'diy', 'other'] as const;
@@ -421,7 +381,6 @@ export interface Stores {
   media: MediaStore;
   coaching: CoachingStore;
   daily: DailyStore;
-  whatsapp: WhatsAppStore;
   training: TrainingStore;
   prospector: ProspectorStore;
 }

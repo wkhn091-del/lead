@@ -1,6 +1,6 @@
 /**
- * Matching WhatsApp chats to leads by phone number. WhatsApp numbers are international digits
- * (972541234567); leads hold whatever was typed or imported: "054-123-4567", "+972 54 123 4567", "00972…".
+ * Phone numbers as international digits (972541234567), however a lead's number was typed or imported:
+ * "054-123-4567", "+972 54 123 4567", "00972…". Used to spot duplicates in imports and in the Prospector.
  */
 
 /**
@@ -23,30 +23,4 @@ export function internationalDigits(phone: string, countryCode: string): string 
   }
   // The shortest international numbers have 8 digits, the longest 15 (E.164)
   return digits.length >= 8 && digits.length <= 15 ? digits : null;
-}
-
-export interface PhoneMatchLead {
-  id: string;
-  phone: string;
-}
-
-/** Leads by their WhatsApp number. Two leads can share a number (a duplicate import); both get the chat. */
-export class LeadPhoneIndex {
-  private readonly byPhone = new Map<string, string[]>();
-
-  constructor(leads: readonly PhoneMatchLead[], countryCode: string) {
-    for (const lead of leads) {
-      const digits = internationalDigits(lead.phone, countryCode);
-      if (!digits) continue;
-      this.byPhone.set(digits, [...(this.byPhone.get(digits) ?? []), lead.id]);
-    }
-  }
-
-  leadsFor(digits: string | null): string[] {
-    return digits ? (this.byPhone.get(digits) ?? []) : [];
-  }
-
-  get size(): number {
-    return this.byPhone.size;
-  }
 }

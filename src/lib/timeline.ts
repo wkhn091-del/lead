@@ -3,7 +3,7 @@ import { STAGE_META } from './stages';
 
 export interface TimelineItem {
   entry: Interaction;
-  /** "ניסיון 2: ענה ← פגישת זום" */
+  /** "ניסיון 2: ענה ← הצעת מחיר" */
   title: string;
   /** Recordings attached to this entry */
   media: MediaFile[];
@@ -25,6 +25,7 @@ export function describeTimeline(newestFirst: readonly Interaction[], media: rea
     const moved = entry.stageTo ? ` ← ${STAGE_META[entry.stageTo].label}` : '';
     let title: string;
     if (entry.step === 'archived') title = 'סומן כלא רלוונטי';
+    else if (entry.step === 'whatsapp') title = 'נשלח וואטסאפ';
     else if (entry.kind === 'call') {
       attempt += 1;
       title = `ניסיון ${attempt}: ${entry.outcome === 'no_answer' ? 'אין מענה' : 'ענה'}${moved}`;
