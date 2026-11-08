@@ -51,7 +51,7 @@ const columns = [
   column.accessor('phone', {
     header: 'טלפון',
     enableSorting: false,
-    cell: ({ getValue }) => (getValue() ? <span className="ltr inline-block tabular-nums">{formatPhone(getValue())}</span> : <Dash />),
+    cell: ({ getValue }) => (getValue() ? <span className="ltr inline-block whitespace-nowrap tabular-nums">{formatPhone(getValue())}</span> : <Dash />),
   }),
   column.accessor('campaign', {
     header: 'נישה',
