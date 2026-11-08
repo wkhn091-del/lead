@@ -8,7 +8,7 @@ import {
   type Row,
   type Table,
 } from '@tanstack/react-table';
-import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, ChevronsUpDown, Ellipsis, MessageCircle, PhoneCall } from 'lucide-react';
+import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, ChevronsUpDown, Ellipsis, Globe, MapPin, MessageCircle, PhoneCall } from 'lucide-react';
 import { useEffect } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
@@ -18,8 +18,10 @@ import { cn } from '../../lib/cn';
 import { dealAmounts } from '../../lib/deal';
 import { formatDate, formatRelative } from '../../lib/format';
 import { callCount, compareText, dealValue, lastContactAt, statusRank } from '../../lib/leads-table';
+import { mapsLink } from '../../lib/maps';
 import { formatPhone } from '../../lib/phone';
 import { ARCHIVED_META, STATUS_META } from '../../lib/stages';
+import { websiteHref, websiteLabel } from '../../lib/website';
 import { useUi } from '../../store/ui';
 import type { Lead } from '../../types';
 import { buttonStyles } from '../ui/Button';
@@ -55,6 +57,23 @@ const columns = [
     header: 'נישה',
     sortingFn: (a, b) => compareText(a.original.campaign, b.original.campaign),
     cell: ({ getValue }) => (getValue() ? <CampaignTag campaign={getValue()} className="h-6 max-w-40" /> : <Dash />),
+  }),
+  // A lead with no city sorts after the rest, whichever way
+  column.accessor((lead) => lead.city?.trim() || undefined, {
+    id: 'city',
+    header: 'עיר',
+    sortUndefined: 'last',
+    sortingFn: (a, b) => compareText(a.original.city ?? '', b.original.city ?? ''),
+    cell: ({ getValue }) => {
+      const city = getValue();
+      return city ? (
+        <span dir="auto" className="block max-w-32 truncate whitespace-nowrap">
+          {city}
+        </span>
+      ) : (
+        <Dash />
+      );
+    },
   }),
   column.accessor(callCount, { id: 'calls', header: 'שיחות', sortDescFirst: true, cell: ({ getValue }) => <span className="tabular-nums">{getValue() || <Dash />}</span> }),
   column.accessor((lead) => lastContactAt(lead) ?? undefined, {
@@ -121,11 +140,16 @@ function NameCell({ lead }: { lead: Lead }) {
 
 const iconButton = buttonStyles({ variant: 'ghost', size: 'icon', className: 'size-8 rounded-lg' });
 
-/** תעד שיחה, WhatsApp with the ready message, and every other action (⋯) */
+/**
+ * תעד שיחה, WhatsApp with the ready message, the business on Google Maps and its website (each in a new tab),
+ * and every other action (⋯)
+ */
 function RowActions({ lead }: { lead: Lead }) {
   const openCallLog = useUi((s) => s.openCallLog);
   const openPalette = useUi((s) => s.openPalette);
   const whatsApp = useWhatsAppLink(lead);
+  const maps = mapsLink(lead);
+  const site = websiteHref(lead.website);
   const archived = Boolean(lead.archivedAt);
   return (
     <div className="flex items-center justify-end gap-0.5" onClick={(event) => event.stopPropagation()}>
@@ -147,6 +171,23 @@ function RowActions({ lead }: { lead: Lead }) {
           <MessageCircle className="size-4" style={{ color: 'var(--whatsapp)' }} aria-hidden />
         </a>
       )}
+      {maps && (
+        <a
+          href={maps.href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={iconButton}
+          aria-label={maps.search ? `חיפוש ${lead.name} בגוגל מפות` : `${lead.name} בגוגל מפות`}
+          title={maps.search ? `חיפוש בגוגל מפות: ${lead.name}, ${lead.city}` : 'גוגל מפות'}
+        >
+          <MapPin className="size-4" style={{ color: 'var(--st-lost)' }} aria-hidden />
+        </a>
+      )}
+      {site && (
+        <a href={site} target="_blank" rel="noopener noreferrer" className={iconButton} aria-label={`האתר של ${lead.name}`} title={websiteLabel(lead.website)}>
+          <Globe className="size-4" style={{ color: 'var(--st-cold)' }} aria-hidden />
+        </a>
+      )}
       <button type="button" className={iconButton} aria-label={`עוד פעולות: ${lead.name}`} title="עוד פעולות" onClick={() => openPalette(lead.id)}>
         <Ellipsis className="size-4" aria-hidden />
       </button>
@@ -159,6 +200,7 @@ const PHONE_SORTS = [
   { value: '', label: 'קשר אחרון קודם' },
   { value: 'created:desc', label: 'נוספו לאחרונה' },
   { value: 'name:asc', label: 'שם העסק, א-ת' },
+  { value: 'city:asc', label: 'לפי עיר' },
   { value: 'status:asc', label: 'לפי סטטוס' },
   { value: 'calls:desc', label: 'הכי הרבה שיחות' },
   { value: 'deal:desc', label: 'עסקה גדולה קודם' },

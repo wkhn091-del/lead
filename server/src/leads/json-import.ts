@@ -22,6 +22,10 @@ import { internationalDigits } from '../lib/phone.js';
  * - The niche, saved as the lead's campaign (what the app groups niches by): niche, category, cat or type, or the
  *   first of a list.
  * - Email, website and contact person go on the lead when they're valid, and in the note when they aren't.
+ * - The city goes on the lead, and so does a Google Maps link (both stay in the note too, with the address).
+ * - A number already on a lead isn't imported again, but what that lead is missing of the city, the Maps link
+ *   and the website is filled in from the item (never changed when it has one): importing a list again
+ *   completes the leads it made before.
  * - The rest goes in the lead's first timeline note, which starts with IMPORT_NOTE: the address (address or
  *   location, or street and city), source, rating, a link to the listing, description and notes.
  * Fields inside an object one level down are found too ({ "contact": { "phone": "…" } }).
@@ -185,28 +189,46 @@ export interface JsonLeadDraft {
   phone: string;
   email: string;
   website: string;
+  city: string;
+  /** The Google Maps listing, from the item's link */
+  mapsUrl: string;
   campaign: string;
   /** The lead's first timeline note: IMPORT_NOTE, then what was read that has no field of its own */
   note: string;
 }
 
+/** Details a lead already in the CRM was missing, from an item with its number: only what it didn't have */
+export interface JsonLeadFill {
+  index: number;
+  /** The lead filled in */
+  id: string;
+  name: string;
+  details: Partial<Pick<JsonLeadDraft, 'city' | 'mapsUrl' | 'website'>>;
+}
+
 export interface JsonImportPlan {
   leads: JsonLeadDraft[];
   skipped: JsonSkip[];
+  /** Leads already in the CRM that the items complete */
+  fills: JsonLeadFill[];
   /** Fields the items had that weren't read, so nothing is left out without a word */
   ignoredFields: string[];
 }
 
-/** What's needed of a lead already in the CRM */
+/** What's needed of a lead already in the CRM: to match its number, and to fill in what it's missing */
 export interface ExistingLead {
   id: string;
   name: string;
   phone: string;
+  city?: string;
+  mapsUrl?: string;
+  website?: string;
 }
 
 // The limits of any new lead (leads.schemas.ts), so a long value is shortened instead of failing the item
 const NAME_LIMIT = 120;
 const CAMPAIGN_LIMIT = 60;
+const CITY_LIMIT = 60;
 const NOTE_LIMIT = 5000;
 const EMAIL_LIMIT = 254;
 const WEBSITE_LIMIT = 500;
@@ -348,9 +370,12 @@ const addresses = (value: unknown, valid: (text: string) => boolean) =>
     return words.length > 1 && words.every(valid) ? words : [part];
   });
 
+/** A Google Maps link: google.<tld>/maps…, maps.google.<tld>/…, maps.app.goo.gl/… */
+const MAPS_LINK = /^https?:\/\/(?:[\w-]+\.)*google\.[a-z.]+\/maps|^https?:\/\/maps\.(?:google\.[a-z.]+|app\.goo\.gl)\//i;
+
 /** Where a listing link leads, by its address */
 const LINK_LABELS: [RegExp, string][] = [
-  [/^https?:\/\/(?:[\w-]+\.)*google\.[a-z.]+\/maps|^https?:\/\/maps\.(?:google\.[a-z.]+|app\.goo\.gl)\//i, 'גוגל מפות'],
+  [MAPS_LINK, 'גוגל מפות'],
   [/^https?:\/\/(?:www\.)?d\.co\.il\//i, 'דפי זהב'],
   [/^https?:\/\/(?:www\.)?b144\.co\.il\//i, 'B144'],
   [/^https?:\/\/(?:www\.)?easy\.co\.il\//i, 'איזי'],
@@ -596,11 +621,12 @@ export function planJsonImport(items: readonly unknown[], existing: readonly Exi
   const known = new Map<string, ExistingLead>();
   for (const lead of existing) {
     const key = phoneKey(lead.phone, countryCode);
-    if (key && !known.has(key)) known.set(key, lead);
+    // A copy: what an item fills in is remembered here, not written on the caller's list
+    if (key && !known.has(key)) known.set(key, { ...lead });
   }
   const first = new Map<string, number>();
   const ignored = new Set<string>();
-  const plan: JsonImportPlan = { leads: [], skipped: [], ignoredFields: [] };
+  const plan: JsonImportPlan = { leads: [], skipped: [], fills: [], ignoredFields: [] };
 
   items.forEach((item, index) => {
     const skip = (reason: JsonSkipReason, message: string, name = '', phone = '', extra: Pick<JsonSkip, 'leadId' | 'firstIndex'> = {}) =>
@@ -634,8 +660,31 @@ export function planJsonImport(items: readonly unknown[], existing: readonly Exi
       skip('no-phone', 'זה לא נראה כמו מספר טלפון.', name, shownPhone);
       return;
     }
+
+    const websites = all('website', fields.website);
+    const website = websites.find((value) => value.length <= WEBSITE_LIMIT && WEBSITE.test(value)) ?? '';
+    const city = clip(best(fields.city, firstText)?.text ?? '', CITY_LIMIT);
+    const links = all('link', fields.link);
+    const mapsUrl = links.find((link) => link.length <= WEBSITE_LIMIT && MAPS_LINK.test(link) && !/\s/.test(link)) ?? '';
+
     const match = known.get(key);
     if (match) {
+      // Already a lead: it isn't made again, but what it's missing of these is filled in
+      const details = Object.fromEntries(
+        (
+          [
+            ['city', city, match.city],
+            ['mapsUrl', mapsUrl, match.mapsUrl],
+            ['website', website, match.website],
+          ] as const
+        ).filter(([, found, current]) => found && current !== undefined && !current.trim()).map(([field, found]) => [field, found]),
+      ) as JsonLeadFill['details'];
+      if (Object.keys(details).length > 0) {
+        plan.fills.push({ index, id: match.id, name: clip(match.name, NAME_LIMIT), details });
+        // The same number further down the list has nothing more to give this lead
+        Object.assign(match, details);
+        return;
+      }
       skip('exists', `המספר כבר שמור בליד ״${clip(match.name, 60)}״.`, name, shownPhone, { leadId: match.id });
       return;
     }
@@ -656,14 +705,11 @@ export function planJsonImport(items: readonly unknown[], existing: readonly Exi
 
     const emails = all('email', fields.email);
     const email = emails.find((value) => value.length <= EMAIL_LIMIT && EMAIL.test(value)) ?? '';
-    const websites = all('website', fields.website);
-    const website = websites.find((value) => value.length <= WEBSITE_LIMIT && WEBSITE.test(value)) ?? '';
     const otherPhones = unique(keys.filter((other): other is string => Boolean(other) && other !== key).map(displayPhone));
     const otherEmails = emails.filter((value) => value !== email);
     const otherSites = websites.filter((value) => value !== website);
 
     const street = best(fields.street, firstText)?.text ?? '';
-    const city = best(fields.city, firstText)?.text ?? '';
     let place = best(fields.address, addressText)?.text || street;
     if (city && !place.includes(city)) place = place ? `${place}, ${city}` : city;
 
@@ -675,7 +721,7 @@ export function planJsonImport(items: readonly unknown[], existing: readonly Exi
       otherEmails.length > 0 && `${email ? 'אימייל נוסף' : 'אימייל'}: ${otherEmails.join(', ')}`,
       otherSites.length > 0 && `${website ? 'אתר נוסף' : 'אתר'}: ${otherSites.join(', ')}`,
       ratingLine(best(fields.rating, numberText)?.text ?? '', best(fields.reviews, numberText)?.text ?? ''),
-      ...all('link', fields.link).map(linkLine),
+      ...links.map(linkLine),
       ...all('description', fields.description),
       ...all('notes', fields.notes),
     ];
@@ -687,6 +733,8 @@ export function planJsonImport(items: readonly unknown[], existing: readonly Exi
       phone: displayPhone(key),
       email,
       website,
+      city,
+      mapsUrl,
       campaign: clip(best(fields.niche, firstText)?.text ?? '', CAMPAIGN_LIMIT),
       note: clip(note.filter(Boolean).join('\n'), NOTE_LIMIT),
     });

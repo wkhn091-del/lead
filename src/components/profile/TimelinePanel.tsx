@@ -17,6 +17,7 @@ import { useTimeline, type LeadProfile, type Upload } from '../../store/timeline
 import { useUi } from '../../store/ui';
 import type { Interaction, Lead, MediaFile } from '../../types';
 import { Button, buttonStyles } from '../ui/Button';
+import { Linkified } from '../ui/Linkified';
 import { ChatEntry } from './ChatEntry';
 import { Composer } from './Composer';
 import { MediaPlayer } from './MediaPlayer';
@@ -230,7 +231,7 @@ function TimelineEntry({ item, lead, uploads }: { item: TimelineItem; lead: Lead
             {notes ? (
               <div className="mt-1">
                 <p dir="auto" className={cn('text-[14px] leading-relaxed break-words whitespace-pre-wrap text-pretty', long && !expanded && 'line-clamp-6')}>
-                  {notes}
+                  <Linkified text={notes} />
                 </p>
                 {long && (
                   <button type="button" onClick={() => setExpanded((open) => !open)} className="mt-1 text-[12.5px] font-medium text-fg-muted underline decoration-line-strong underline-offset-4 hover:text-fg">

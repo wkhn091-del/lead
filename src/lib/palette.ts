@@ -29,7 +29,7 @@ function wordScore(text: string, word: string): number {
 
 /**
  * Leads matching every word of the query, best first. A word can match the business, the contact, the
- * campaign, the email or the website; digits also match the phone however it was typed (054…, +972 54…).
+ * campaign, the city, the email or the website; digits also match the phone however it was typed (054…, +972 54…).
  * `boost` lifts leads that matter right now, like today's calls.
  */
 export function searchLeads(leads: readonly Lead[], query: string, boost: ReadonlySet<string> = new Set(), limit = 8): LeadHit[] {
@@ -38,7 +38,7 @@ export function searchLeads(leads: readonly Lead[], query: string, boost: Readon
   const hits: LeadHit[] = [];
   for (const lead of leads) {
     const name = normalize(lead.name);
-    const fields = [name, normalize(lead.contactName), normalize(lead.campaign), normalize(lead.email), normalize(lead.website)];
+    const fields = [name, normalize(lead.contactName), normalize(lead.campaign), normalize(lead.city ?? ''), normalize(lead.email), normalize(lead.website)];
     const local = phoneDigits(lead.phone);
     const international = toInternational(lead.phone) ?? '';
     let score = 0;

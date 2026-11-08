@@ -33,6 +33,8 @@ const leadSelect = {
   phone: true,
   email: true,
   website: true,
+  city: true,
+  mapsUrl: true,
   campaign: true,
   approach: true,
   method: true,
@@ -62,6 +64,9 @@ export function leadDeal(row: Pick<LeadRow, 'deal' | 'legacyValue' | 'stage'>): 
 
 const toLead = ({ deal: _deal, legacyValue: _legacyValue, ...row }: LeadRow): LeadRecord => ({
   ...row,
+  // Leads stored before these fields existed have none
+  city: row.city ?? '',
+  mapsUrl: row.mapsUrl ?? '',
   deal: leadDeal({ deal: _deal, legacyValue: _legacyValue, stage: row.stage }),
   archivedAt: row.archivedAt ?? null,
   lastAttemptAt: row.lastAttemptAt ?? null,
@@ -150,9 +155,13 @@ export function createPrismaStores(prisma: PrismaClient): Stores {
       return rows.map(toLead);
     },
     get: findLead,
-    phones() {
-      // Only these three fields come back from MongoDB, whatever the number of leads
-      return prisma.lead.findMany({ where: { phone: { not: '' } }, select: { id: true, name: true, phone: true } });
+    async phones() {
+      // Only these fields come back from MongoDB, whatever the number of leads
+      const rows = await prisma.lead.findMany({
+        where: { phone: { not: '' } },
+        select: { id: true, name: true, phone: true, city: true, mapsUrl: true, website: true },
+      });
+      return rows.map((row) => ({ ...row, city: row.city ?? '', mapsUrl: row.mapsUrl ?? '' }));
     },
     async create(input) {
       try {

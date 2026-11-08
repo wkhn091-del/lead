@@ -10,6 +10,7 @@ import { isTranscribing, type TimelineItem } from '../../lib/timeline';
 import { useTimeline } from '../../store/timeline';
 import type { ChatLine, Lead, MediaFile } from '../../types';
 import { Button } from '../ui/Button';
+import { Linkified } from '../ui/Linkified';
 import { MediaPlayer } from './MediaPlayer';
 
 const fullDate = new Intl.DateTimeFormat(appConfig.locale, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
@@ -99,7 +100,13 @@ function Content({ line, lead, media }: { line: ChatLine; lead: Lead; media: Med
   const retranscribe = useTimeline((s) => s.retranscribe);
 
   if (line.deleted) return <p className="text-[13.5px] text-fg-faint italic">ההודעה נמחקה</p>;
-  if (line.type === 'text') return <p dir="auto" className="text-[14px] leading-relaxed break-words whitespace-pre-wrap">{line.text}</p>;
+  if (line.type === 'text') {
+    return (
+      <p dir="auto" className="text-[14px] leading-relaxed break-words whitespace-pre-wrap">
+        <Linkified text={line.text} />
+      </p>
+    );
+  }
   if (line.type !== 'voice') {
     return (
       <p dir="auto" className="text-[14px] leading-relaxed break-words whitespace-pre-wrap">

@@ -29,6 +29,8 @@ export interface ImportOutcome {
 /** Where a JSON import stands: what it saved and skipped so far, and how far through the paste it got */
 export interface JsonImportOutcome {
   created: Lead[];
+  /** Leads that were already in the CRM, completed from the paste: the city, Maps link or website they lacked */
+  updated: Lead[];
   /** By the item's place in the whole paste, from 0 */
   skipped: JsonSkip[];
   /** Fields the items had that aren't read */
@@ -283,6 +285,7 @@ export const useLeadStore = create<LeadsState>()((set, get) => {
     addLead(input) {
       const now = new Date().toISOString();
       const firstNote = input.note.trim();
+      const city = (input.city ?? '').trim().slice(0, 60);
       const lead: NewLead = {
         id: createId(),
         name: input.name.trim(),
@@ -290,6 +293,8 @@ export const useLeadStore = create<LeadsState>()((set, get) => {
         phone: input.phone.trim(),
         email: input.email.trim(),
         website: input.website.trim(),
+        // Sent only when there is one, so a server from before cities still takes the lead
+        ...(city ? { city } : {}),
         campaign: input.campaign.trim(),
         approach: input.approach.trim(),
         method: input.method,
@@ -341,6 +346,7 @@ export const useLeadStore = create<LeadsState>()((set, get) => {
     async importJson(items, { from, mapping, onProgress } = {}) {
       const outcome: JsonImportOutcome = {
         created: [...(from?.created ?? [])],
+        updated: [...(from?.updated ?? [])],
         skipped: [...(from?.skipped ?? [])],
         ignoredFields: [...(from?.ignoredFields ?? [])],
         done: from?.done ?? 0,
@@ -368,8 +374,19 @@ export const useLeadStore = create<LeadsState>()((set, get) => {
           }
           for (const field of result.ignoredFields) if (!outcome.ignoredFields.includes(field)) outcome.ignoredFields.push(field);
           outcome.created.push(...result.created);
+          const filled = result.updated ?? [];
+          for (const lead of filled) {
+            // A lead an earlier part of this paste made is still a new one, now with more details
+            const list = outcome.created.some((item) => item.id === lead.id) ? outcome.created : outcome.updated;
+            const at = list.findIndex((item) => item.id === lead.id);
+            if (at >= 0) list[at] = lead;
+            else list.push(lead);
+          }
           const ids = new Set(result.created.map((lead) => lead.id));
-          set((state) => ({ leads: [...result.created, ...state.leads.filter((lead) => !ids.has(lead.id))] }));
+          const filledById = new Map(filled.map((lead) => [lead.id, lead]));
+          set((state) => ({
+            leads: [...result.created, ...state.leads.filter((lead) => !ids.has(lead.id)).map((lead) => filledById.get(lead.id) ?? lead)],
+          }));
           outcome.done += batch.length;
           onProgress?.(outcome.done);
         }

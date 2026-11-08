@@ -38,7 +38,7 @@ describe('reading pasted JSON', () => {
     const plan = planJsonImport(SAMPLE, [], '972');
     expect(plan.skipped).toEqual([]);
     expect(plan.ignoredFields).toEqual([]);
-    const blank = { contactName: '', email: '', website: '' };
+    const blank = { contactName: '', email: '', website: '', city: '', mapsUrl: '' };
     expect(plan.leads).toEqual([
       { index: 0, name: 'יוסי שיפוצים', phone: '054-123-4567', campaign: 'קבלני שיפוצים', note: 'יובא מקובץ JSON\nמקור: קמפיין פייסבוק\nביקש לחזור אליו אחרי החגים', ...blank },
       { index: 1, name: 'מוסך הגליל', phone: '052-987-6543', campaign: 'מוסכים', note: 'יובא מקובץ JSON\nמקור: חיפוש גוגל', ...blank },
@@ -100,6 +100,9 @@ describe('reading pasted JSON', () => {
         phone: '050-909-4047',
         email: '',
         website: '',
+        // The city and the Maps listing go on the lead; the note keeps them with the rest
+        city: 'ירושלים',
+        mapsUrl: 'https://www.google.com/maps/search/?api=1&query_place_id=ChIJ_WdbXrzXAhURVLgwOQFqrDY',
         campaign: 'מספרה',
         note: [
           'יובא מקובץ JSON',
@@ -115,6 +118,9 @@ describe('reading pasted JSON', () => {
         phone: '09-765-4321',
         email: '',
         website: '',
+        // From inside the address; a Yellow Pages link isn't a Maps listing
+        city: 'רעננה',
+        mapsUrl: '',
         campaign: 'חנויות פרחים',
         note: 'יובא מקובץ JSON\nכתובת: הרצל 5, רעננה\nטלפון נוסף: 050-123-4567\nדפי זהב: https://www.d.co.il/80123456/',
       },
@@ -205,7 +211,7 @@ describe('reading pasted JSON', () => {
     expect(plan.skipped[4].message).toBe('אין מספר טלפון (phone, mobile או tel).');
     expect(plan.skipped[6].message).toBe('השדה name צריך להכיל טקסט.');
     expect(plan.leads).toEqual([
-      { index: 7, name: 'אותיות גדולות', contactName: '', phone: '054-333-3333', email: 'a@b.example', website: '', campaign: '', note: 'יובא מקובץ JSON\nכתובת: חיפה' },
+      { index: 7, name: 'אותיות גדולות', contactName: '', phone: '054-333-3333', email: 'a@b.example', website: '', city: 'חיפה', mapsUrl: '', campaign: '', note: 'יובא מקובץ JSON\nכתובת: חיפה' },
       {
         index: 8,
         name: 'שדות בעברית',
@@ -213,11 +219,42 @@ describe('reading pasted JSON', () => {
         phone: '054-444-4444',
         email: '',
         website: '',
+        city: '',
+        mapsUrl: '',
         campaign: 'מסגריות',
         note: 'יובא מקובץ JSON\nמקור: המלצה\nשורה אחת\nשורה שתיים',
       },
     ]);
     expect(plan.ignoredFields).toEqual(['name', 'fax']);
+  });
+
+  it('fills in the city, Maps link and website a lead already here is missing, and changes nothing it has', () => {
+    const maps = 'https://www.google.com/maps/search/?api=1&query_place_id=ChIJabc';
+    const existing = [
+      { id: 'old', name: 'מספרת קובי', phone: '050-111-2233', city: '', mapsUrl: '', website: '' },
+      { id: 'full', name: 'נגריית הכרמל', phone: '04-812-3456', city: 'חיפה', mapsUrl: maps, website: 'carmel.example' },
+      // An app that doesn't say what a lead has: nothing is filled in on a guess
+      { id: 'unknown', name: 'מסגרייה', phone: '054-999-8877' },
+    ];
+    const plan = planJsonImport(
+      [
+        { title: 'מספרת קובי', phone: '+972 50-111-2233', city: 'ירושלים', url: maps, website: 'kobi.example' },
+        { title: 'מספרת קובי שוב', phone: '0501112233', city: 'תל אביב' },
+        { title: 'נגריית הכרמל', phone: '04-8123456', city: 'עכו', url: 'https://www.google.com/maps/place/other' },
+        { title: 'מסגרייה', phone: '054-9998877', city: 'באר שבע' },
+      ],
+      existing,
+      '972',
+    );
+    expect(plan.leads).toEqual([]);
+    expect(plan.fills).toEqual([{ index: 0, id: 'old', name: 'מספרת קובי', details: { city: 'ירושלים', mapsUrl: maps, website: 'kobi.example' } }]);
+    expect(plan.skipped.map(({ index, reason, leadId }) => [index, reason, leadId])).toEqual([
+      [1, 'exists', 'old'],
+      [2, 'exists', 'full'],
+      [3, 'exists', 'unknown'],
+    ]);
+    // The list given isn't changed
+    expect(existing[0].city).toBe('');
   });
 
   it('reads keys by what is in them, after every exact name', () => {
@@ -270,7 +307,7 @@ describe('reading pasted JSON', () => {
       '972',
     );
     expect(plan.leads).toEqual([
-      { index: 0, name: 'מסגרייה', contactName: '', phone: '054-999-8877', email: '', website: '', campaign: '', note: 'יובא מקובץ JSON\nטלפון נוסף: 052-111-2233' },
+      { index: 0, name: 'מסגרייה', contactName: '', phone: '054-999-8877', email: '', website: '', city: '', mapsUrl: '', campaign: '', note: 'יובא מקובץ JSON\nטלפון נוסף: 052-111-2233' },
     ]);
     expect(plan.skipped).toMatchObject([{ index: 1, reason: 'no-phone' }]);
     expect(plan.ignoredFields).toEqual(['fax', 'code', 'date']);
@@ -392,6 +429,28 @@ describe('POST /api/leads/import-json', () => {
       .expect(201);
     expect(response.body.created).toMatchObject([{ name: 'שיפוצי יוסי', contactName: '', phone: '054-123-4567', campaign: 'שיפוצים', stage: 'cold_call', activity: [] }]);
     await api.post(`/api/leads/import-json?name=${'x'.repeat(201)}`).send([{ name: 'א', phone: '054-7654321' }]).expect(400);
+  });
+
+  it('completes the leads an earlier import made, when the list is imported again', async () => {
+    const { api } = setup();
+    const maps = 'https://www.google.com/maps/search/?api=1&query_place_id=ChIJxyz';
+    await api.post('/api/leads/import-json').send([{ name: 'מספרת קובי', phone: '050-1112233' }]).expect(201);
+    const again = await api
+      .post('/api/leads/import-json')
+      .send([{ title: 'מספרת קובי', phone: '+972 50-111-2233', city: 'ירושלים', url: maps }, { title: 'חדשה', phone: '052-7654321', city: 'טבריה' }])
+      .expect(201);
+    expect(again.body.created).toMatchObject([{ name: 'חדשה', city: 'טבריה', mapsUrl: '' }]);
+    expect(again.body.updated).toMatchObject([{ name: 'מספרת קובי', city: 'ירושלים', mapsUrl: maps, stage: 'cold_call' }]);
+    expect(again.body.skipped).toEqual([]);
+    const leads = (await api.get('/api/leads').expect(200)).body as { name: string; city: string }[];
+    expect(leads.map(({ name, city }) => [name, city]).sort()).toEqual([
+      ['חדשה', 'טבריה'],
+      ['מספרת קובי', 'ירושלים'],
+    ]);
+    // And a city or Maps link can be set by hand, a link only if it's http(s)
+    const [kobi] = again.body.updated as { id: string }[];
+    await api.patch(`/api/leads/${kobi.id}`).send({ city: 'בית שמש' }).expect(200);
+    await api.patch(`/api/leads/${kobi.id}`).send({ mapsUrl: 'javascript:alert(1)' }).expect(400);
   });
 
   it('takes only a JSON array of leads, within the limit', async () => {

@@ -293,7 +293,9 @@ export function createLocalRepository(): LeadRepository {
     createMany,
     async importJson(items, mapping = {}) {
       // The server's rules, against the leads in this browser
-      const plan = planJsonImport(items, read(), appConfig.defaultCountryCode, mapping);
+      // A lead saved here before cities existed has none (not an unknown one), so it can be filled in
+      const existing = read().map((lead) => ({ ...lead, city: lead.city ?? '', mapsUrl: lead.mapsUrl ?? '' }));
+      const plan = planJsonImport(items, existing, appConfig.defaultCountryCode, mapping);
       const rows = plan.leads.map(
         (draft): ParsedRow => ({
           key: String(draft.index),
@@ -308,8 +310,15 @@ export function createLocalRepository(): LeadRepository {
           notes: draft.note,
         }),
       );
-      const { created } = await createMany(buildLeads(rows, { method: 'call', campaign: '', currency: appConfig.baseCurrency }));
-      return { created, skipped: plan.skipped, ignoredFields: plan.ignoredFields };
+      const built = buildLeads(rows, { method: 'call', campaign: '', currency: appConfig.baseCurrency }).map((lead, index) => ({
+        ...lead,
+        city: plan.leads[index].city,
+        mapsUrl: plan.leads[index].mapsUrl,
+      }));
+      const { created } = await createMany(built);
+      // Leads already here get what they were missing of the city, the Maps link and the website
+      const updated = plan.fills.map((fill) => replace(touched(patchLead(find(fill.id), fill.details))));
+      return { created, updated, skipped: plan.skipped, ignoredFields: plan.ignoredFields };
     },
     async update(id, patch) {
       const lead = find(id);

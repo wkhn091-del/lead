@@ -160,6 +160,10 @@ model Lead {
   phone          String        @default("")
   email          String        @default("")
   website        String        @default("")
+  /// The city or town the business is in. Optional: leads stored before it existed have none (read as "").
+  city           String?
+  /// The business's Google Maps listing. Optional, like city.
+  mapsUrl        String?
   /// Topic or niche of the batch the lead came in with, e.g. "Dentists"
   campaign       String        @default("")
   /// How to talk to this lead

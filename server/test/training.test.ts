@@ -75,6 +75,8 @@ function leadRecord(id: string, name: string): LeadRecord {
     phone: '054-123-4567',
     email: 'amir@private.example',
     website: 'secret-site.example',
+    city: '',
+    mapsUrl: '',
     campaign: 'Bakeries',
     approach: '',
     method: 'call',

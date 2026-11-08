@@ -3,7 +3,7 @@ import type { Lead } from '../types';
 
 // The server's import, in memory: its rules (server/src/leads/json-import.ts) over the leads it has
 const server = vi.hoisted(() => ({
-  leads: [] as { id: string; name: string; phone: string }[],
+  leads: [] as { id: string; name: string; phone: string; city?: string; mapsUrl?: string; website?: string }[],
   requests: [] as number[],
   /** The request with this number (from 1) fails with no connection */
   failOn: null as number | null,
@@ -19,9 +19,24 @@ vi.mock('../data/repository', async () => {
         server.requests.push(items.length);
         if (server.failOn === server.requests.length) throw new ApiError(0, 'אין חיבור לשרת.');
         const plan = planJsonImport(items, server.leads, '972');
-        const created = plan.leads.map((draft) => ({ id: `lead-${server.leads.length + draft.index}-${Math.random()}`, name: draft.name, phone: draft.phone }) as Lead);
+        const created = plan.leads.map(
+          (draft) =>
+            ({
+              id: `lead-${server.leads.length + draft.index}-${Math.random()}`,
+              name: draft.name,
+              phone: draft.phone,
+              city: draft.city,
+              mapsUrl: draft.mapsUrl,
+              website: draft.website,
+            }) as Lead,
+        );
         server.leads.push(...created);
-        return { created, skipped: plan.skipped, ignoredFields: plan.ignoredFields };
+        const updated = plan.fills.map((fill) => {
+          const stored = server.leads.find((item) => item.id === fill.id)!;
+          Object.assign(stored, fill.details);
+          return { ...stored } as Lead;
+        });
+        return { created, updated, skipped: plan.skipped, ignoredFields: plan.ignoredFields };
       },
     },
   };
@@ -56,6 +71,30 @@ describe('importing pasted JSON', () => {
       { index: 1150, reason: 'no-phone', leadId: undefined },
     ]);
     expect(useLeadStore.getState().leads).toHaveLength(1197);
+  });
+
+  it('completes leads already in the CRM, and keeps a lead this paste made among the new ones', async () => {
+    server.leads = [{ id: 'old', name: 'ליד ותיק', phone: '054-000-0000', city: '', mapsUrl: '', website: '' }];
+    useLeadStore.setState({ leads: [{ id: 'old', name: 'ליד ותיק', phone: '054-000-0000' } as Lead] });
+    const listing = 'https://www.google.com/maps/search/?api=1&query=x&query_place_id=abc';
+    const items = [
+      ...Array.from({ length: 500 }, (_, i) => lead(i)),
+      // In the second part: the old lead's number, with what it lacks
+      { name: 'ליד ותיק', phone: '+972 54-000-0000', city: 'טבריה', url: listing },
+      // The number of item 0, which the first part added: now with a city
+      { ...lead(0), city: 'ירושלים' },
+    ];
+    const outcome = await useLeadStore.getState().importJson(items);
+
+    expect(server.requests).toEqual([500, 2]);
+    expect(outcome.updated.map(({ id, city, mapsUrl }) => ({ id, city, mapsUrl }))).toEqual([{ id: 'old', city: 'טבריה', mapsUrl: listing }]);
+    expect(outcome.created).toHaveLength(500);
+    expect(outcome.created.find((item) => item.name === 'עסק 0')?.city).toBe('ירושלים');
+    expect(outcome.skipped).toEqual([]);
+    const shown = useLeadStore.getState().leads;
+    expect(shown).toHaveLength(501);
+    expect(shown.find((item) => item.id === 'old')).toMatchObject({ city: 'טבריה', mapsUrl: listing });
+    expect(shown.find((item) => item.name === 'עסק 0')?.city).toBe('ירושלים');
   });
 
   it('carries on where it stopped, without adding anything twice', async () => {

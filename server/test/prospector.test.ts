@@ -651,6 +651,8 @@ describe('a search, end to end', () => {
       phone: '+972 4-600-0012',
       email: '',
       website: '',
+      city: '',
+      mapsUrl: '',
       campaign: '',
       approach: '',
       method: 'call',

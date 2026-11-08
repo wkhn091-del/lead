@@ -77,7 +77,8 @@ export function createLeadsRouter(
    * names, or from the key chosen for it in the address (?name=title&phone=mobile&niche=category). Before the
    * insert, the numbers already on a lead are looked up in the database, and they (in any format) and numbers
    * repeated in the paste are filtered out, so only leads with new numbers are saved, every one as a new lead
-   * ("חדש"). Answers what was created and what was skipped and why.
+   * ("חדש"). A lead whose number is in the paste gets what it's missing of the city, the Maps link and the
+   * website. Answers what was created, what was filled in, and what was skipped and why.
    */
   router.post('/import-json', async (req, res) => {
     const items = JsonImportBody.parse(req.body);
@@ -98,6 +99,8 @@ export function createLeadsRouter(
           phone: lead.phone,
           email: lead.email,
           website: lead.website,
+          city: lead.city,
+          mapsUrl: lead.mapsUrl,
           campaign: lead.campaign,
           method: 'call',
           // Every imported lead starts its timeline with this note (it opens with "יובא מקובץ JSON")
@@ -112,7 +115,16 @@ export function createLeadsRouter(
     });
     // One insertMany for all of them (createMany), with their notes on the timeline
     const created = inputs.length ? (await store.createMany(inputs)).created : [];
-    res.status(201).json({ created, skipped: skipped.sort((a, b) => a.index - b.index), ignoredFields: plan.ignoredFields });
+    // Then what the leads already here were missing, each checked like an edit
+    const updated: LeadRecord[] = [];
+    for (const fill of plan.fills) {
+      const patch = LeadPatch.safeParse(fill.details);
+      if (!patch.success) continue;
+      const { deal: _never, ...details } = patch.data;
+      const lead = await store.update(fill.id, details);
+      if (lead) updated.push(lead);
+    }
+    res.status(201).json({ created, updated, skipped: skipped.sort((a, b) => a.index - b.index), ignoredFields: plan.ignoredFields });
   });
 
   router.post('/bulk-delete', async (req, res) => {

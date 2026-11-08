@@ -40,6 +40,13 @@ const Website = z
   .max(500)
   .refine((value) => value === '' || WEBSITE.test(value), 'צריך כתובת אתר, כמו business.co.il');
 const Campaign = z.string().trim().max(60);
+const City = z.string().trim().max(60);
+/** A Google Maps listing (or any http(s) page about the business): only http(s), since it becomes a link */
+const MapsUrl = z
+  .string()
+  .trim()
+  .max(500)
+  .refine((value) => value === '' || /^https?:\/\/\S+$/i.test(value), 'צריך קישור שמתחיל ב-https://');
 const Approach = z.string().trim().max(2000);
 /** Whole units of the lead's currency */
 const Amount = z.number().int().min(0).max(99_999_999);
@@ -77,6 +84,8 @@ export const LeadInput = z.strictObject({
   phone: Phone.default(''),
   email: Email.default(''),
   website: Website.default(''),
+  city: City.default(''),
+  mapsUrl: MapsUrl.default(''),
   campaign: Campaign.default(''),
   approach: Approach.default(''),
   method: Method,
@@ -106,6 +115,8 @@ export const LeadPatch = z
     phone: Phone,
     email: Email,
     website: Website,
+    city: City,
+    mapsUrl: MapsUrl,
     campaign: Campaign,
     approach: Approach,
     method: Method,

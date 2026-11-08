@@ -112,6 +112,9 @@ export function leadFor(prospect: ProspectRecord, search: ProspectSearchRecord, 
     email: prospect.analysis.signals?.emails[0] ?? '',
     // A Facebook page or directory link is kept too: it's still where to look before the call.
     website: prospect.website,
+    // The area the search was for: where these businesses are
+    city: search.location.trim().slice(0, 60),
+    mapsUrl: /^https?:\/\/\S+$/i.test(prospect.mapsUrl) && prospect.mapsUrl.length <= 500 ? prospect.mapsUrl : '',
     campaign: campaignFor(search),
     approach: approachFor(prospect),
     method: 'call' as const,

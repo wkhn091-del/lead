@@ -1,9 +1,10 @@
 import { motion } from 'motion/react';
-import { Globe, MessageCircle, PanelRightOpen, PhoneCall, Sparkles, SquarePen, Undo2, UserRound } from 'lucide-react';
+import { Globe, MapPin, MessageCircle, PanelRightOpen, PhoneCall, Sparkles, SquarePen, Undo2, UserRound } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { appConfig } from '../../config';
 import { cn } from '../../lib/cn';
 import { formatRelative } from '../../lib/format';
+import { mapsLink } from '../../lib/maps';
 import { EASE_OUT } from '../../lib/motion';
 import { formatPhone, telHref } from '../../lib/phone';
 import { ARCHIVED_META, OUTCOME_META, STAGE_META, toneStyle } from '../../lib/stages';
@@ -70,6 +71,8 @@ export function DailyCard({ item }: { item: QueueItem }) {
   const tel = telHref(lead.phone);
   const whatsApp = useWhatsAppLink(lead);
   const site = websiteHref(lead.website);
+  const maps = mapsLink(lead);
+  const city = lead.city?.trim() ?? '';
   const done = outcome !== null;
   const outcomeMeta = outcome ? OUTCOME_META[outcome.type] : null;
 
@@ -111,6 +114,20 @@ export function DailyCard({ item }: { item: QueueItem }) {
               </span>
             )}
             {lead.phone && <span className="ltr tabular-nums select-all">{formatPhone(lead.phone)}</span>}
+            {maps && (
+              <a
+                href={maps.href}
+                target="_blank"
+                rel="noreferrer noopener"
+                title={maps.search ? `חיפוש בגוגל מפות: ${lead.name}, ${city}` : 'גוגל מפות'}
+                className="inline-flex min-w-0 items-center gap-1.5 hover:text-fg"
+              >
+                <MapPin className="size-3.5 shrink-0" style={{ color: 'var(--st-lost)' }} aria-hidden />
+                <span dir="auto" className="truncate underline decoration-line-strong underline-offset-4">
+                  {city || 'גוגל מפות'}
+                </span>
+              </a>
+            )}
             {site && (
               <a href={site} target="_blank" rel="noreferrer noopener" className="inline-flex min-w-0 items-center gap-1.5 hover:text-fg">
                 <Globe className="size-3.5 shrink-0" aria-hidden />

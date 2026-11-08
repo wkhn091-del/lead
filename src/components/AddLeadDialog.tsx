@@ -39,14 +39,15 @@ const emptyForm = (): NewLeadInput => ({
   phone: '',
   email: '',
   website: '',
+  city: '',
   campaign: '',
   approach: '',
   method: 'call',
   note: '',
 });
 
-const TEXT_FIELDS = ['name', 'contactName', 'phone', 'email', 'website', 'campaign', 'approach', 'note'] as const;
-const isEmptyForm = (form: NewLeadInput) => !TEXT_FIELDS.some((key) => form[key].trim());
+const TEXT_FIELDS = ['name', 'contactName', 'phone', 'email', 'website', 'city', 'campaign', 'approach', 'note'] as const;
+const isEmptyForm = (form: NewLeadInput) => !TEXT_FIELDS.some((key) => (form[key] ?? '').trim());
 
 const textareaClass = cn(inputBase, 'block resize-none px-3.5 py-3 text-base leading-relaxed sm:text-[14.5px]');
 
@@ -84,7 +85,13 @@ function NewLeadForm({ onDone }: { onDone: () => void }) {
     forgetDraft();
     const ui = useUi.getState();
     // A new lead is "חדש": the leads show it, without a search, niche or status filter that would hide it
-    if (ui.query || (ui.campaignFilter && ui.campaignFilter !== lead.campaign) || (ui.statusFilter.length && !ui.statusFilter.includes('new'))) ui.resetFilters();
+    if (
+      ui.query ||
+      (ui.campaignFilter && ui.campaignFilter !== lead.campaign) ||
+      (ui.cityFilter && ui.cityFilter !== (lead.city ?? '')) ||
+      (ui.statusFilter.length && !ui.statusFilter.includes('new'))
+    )
+      ui.resetFilters();
     if (ui.boardTab !== 'new') ui.setBoardTab('new');
     ui.highlight([lead.id]);
     toast.success('הליד נוסף', lead.name);
@@ -154,6 +161,19 @@ function NewLeadForm({ onDone }: { onDone: () => void }) {
                   value={form.campaign}
                   onChange={(event) => update('campaign', event.target.value)}
                   placeholder="למשל: רופאי שיניים"
+                  className={fieldClass()}
+                />
+              </Field>
+              <Field label="עיר" htmlFor="new-lead-city">
+                <input
+                  id="new-lead-city"
+                  dir="auto"
+                  autoComplete="off"
+                  list="city-options"
+                  maxLength={60}
+                  value={form.city ?? ''}
+                  onChange={(event) => update('city', event.target.value)}
+                  placeholder="למשל: ירושלים"
                   className={fieldClass()}
                 />
               </Field>

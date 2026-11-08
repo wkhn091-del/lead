@@ -606,6 +606,7 @@ function LeadItem({ lead, badge, onSelect }: { lead: Lead; badge?: string; onSel
           {lead.contactName && <span dir="auto" className="truncate">{lead.contactName}</span>}
           {lead.phone && <span className="ltr shrink-0 tabular-nums">{formatPhone(lead.phone)}</span>}
           {lead.campaign && <span dir="auto" className="truncate text-fg-faint max-sm:hidden">{lead.campaign}</span>}
+          {lead.city && <span dir="auto" className="truncate text-fg-faint max-sm:hidden">{lead.city}</span>}
         </span>
       </span>
       {badge && <span className="shrink-0 rounded-full bg-field px-2 py-0.5 text-[11.5px] font-medium text-fg-muted ring-1 ring-line ring-inset">{badge}</span>}

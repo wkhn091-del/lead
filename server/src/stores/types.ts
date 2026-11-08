@@ -10,6 +10,10 @@ export interface LeadRecord extends WorkflowState {
   phone: string;
   email: string;
   website: string;
+  /** The city or town the business is in, "" when unknown */
+  city: string;
+  /** Its Google Maps listing, "" when unknown */
+  mapsUrl: string;
   campaign: string;
   approach: string;
   method: LeadInput['method'];
@@ -143,8 +147,11 @@ export type LeadUpdate = Omit<LeadPatch, 'deal'> & { deal?: DealTerms };
 export interface LeadStore {
   list(): Promise<LeadRecord[]>;
   get(id: string): Promise<LeadRecord | null>;
-  /** Every lead that has a phone number: its id, name and the number as stored, to match numbers without whole leads */
-  phones(): Promise<Pick<LeadRecord, 'id' | 'name' | 'phone'>[]>;
+  /**
+   * Every lead that has a phone number: its id, name and the number as stored, to match numbers without whole
+   * leads, and the details an import may fill in when they're missing (city, Maps link, website)
+   */
+  phones(): Promise<Pick<LeadRecord, 'id' | 'name' | 'phone' | 'city' | 'mapsUrl' | 'website'>[]>;
   /** Throws ConflictError when the id is taken */
   create(input: LeadInput): Promise<LeadRecord>;
   /** Creates every lead with a new id in one write */
@@ -415,6 +422,8 @@ export function newLeadState(input: LeadInput, now: Date) {
     phone: input.phone,
     email: input.email,
     website: input.website,
+    city: input.city,
+    mapsUrl: input.mapsUrl,
     campaign: input.campaign,
     approach: input.approach,
     method: input.method,

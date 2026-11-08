@@ -70,7 +70,9 @@ export function createMemoryStores(): Stores {
         return lead ? copy(lead) : null;
       },
       async phones() {
-        return [...leads.values()].filter((lead) => lead.phone !== '').map(({ id, name, phone }) => ({ id, name, phone }));
+        return [...leads.values()]
+          .filter((lead) => lead.phone !== '')
+          .map(({ id, name, phone, city, mapsUrl, website }) => ({ id, name, phone, city, mapsUrl, website }));
       },
       async create(input) {
         if (leads.has(input.id)) throw new ConflictError('כבר קיים ליד עם המזהה הזה.');

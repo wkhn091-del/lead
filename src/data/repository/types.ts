@@ -39,6 +39,8 @@ export interface BulkCreateResult {
 /** What a JSON import saved, and what it skipped and why (server/src/leads/json-import.ts) */
 export interface JsonImportResult {
   created: Lead[];
+  /** Leads already here whose missing city, Maps link or website the items filled in (missing from older servers) */
+  updated?: Lead[];
   /** By the item's place in what was sent */
   skipped: JsonSkip[];
   /** Fields the items had that aren't read */
