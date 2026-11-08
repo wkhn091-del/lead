@@ -60,6 +60,19 @@ let pollTimer: ReturnType<typeof setTimeout> | undefined;
 /** Bumped by every open and reset, so an answer for a search no longer on screen is dropped */
 let generation = 0;
 
+/** "עסק אחד כבר ב-CRM, ו-2 היו בו ונמחקו (…), אז הם לא נוספו שוב." ('' when every business was new) */
+function notAddedAgain(known: number, wasDeleted: number): string {
+  if (!known && !wasDeleted) return '';
+  const where = known ? 'בו' : 'ב-CRM';
+  const parts = [
+    known > 0 && (known === 1 ? 'עסק אחד כבר ב-CRM' : `${known} עסקים כבר ב-CRM`),
+    wasDeleted > 0 &&
+      (wasDeleted === 1 ? `${known ? 'ואחד' : 'עסק אחד'} היה ${where} ונמחק` : `${known ? `ו-${wasDeleted}` : `${wasDeleted} עסקים`} היו ${where} ונמחקו`),
+  ].filter(Boolean);
+  const one = known + wasDeleted === 1;
+  return `${parts.join(', ')} (אותו טלפון, מקום במפות, אתר או שם), אז ${one ? 'הוא לא נוסף' : 'הם לא נוספו'} שוב.`;
+}
+
 export const useProspector = create<ProspectorState>()((set, get) => {
   /** Puts a search's latest numbers into the list */
   const mergeSearch = (search: ProspectSearch) =>
@@ -329,7 +342,8 @@ export const useProspector = create<ProspectorState>()((set, get) => {
         }
         set({ selected: new Set() });
         await refreshCurrent().catch(() => {});
-        const known = result.skipped.filter((item) => item.reason !== 'missing').length;
+        const known = result.skipped.filter((item) => item.reason === 'exists' || item.reason === 'imported').length;
+        const wasDeleted = result.skipped.filter((item) => item.reason === 'deleted').length;
         if (result.created.length) {
           toast.show({
             tone: 'success',
@@ -337,16 +351,17 @@ export const useProspector = create<ProspectorState>()((set, get) => {
               result.created.length === 1
                 ? 'ליד אחד נוסף למאגר של העשירייה היומית'
                 : `${result.created.length} לידים נוספו למאגר של העשירייה היומית`,
-            description: known
-              ? known === 1
-                ? 'עסק אחד כבר ב-CRM (אותו טלפון או אתר), אז הוא לא נוסף שוב.'
-                : `${known} עסקים כבר ב-CRM (אותו טלפון או אתר), אז הם לא נוספו שוב.`
-              : 'הם בסטטוס חדש, עם ניתוח האתר בציר הזמן.',
+            description: notAddedAgain(known, wasDeleted) || 'הם בסטטוס חדש, עם ניתוח האתר בציר הזמן.',
             duration: 7000,
             action: { label: 'לשיחות של היום', onClick: () => useUi.getState().setView('today') },
           });
+        } else if (wasDeleted && !known) {
+          toast.show({ message: wasDeleted === 1 ? 'העסק הזה כבר היה ב-CRM ונמחק' : 'כל העסקים שבחרת כבר היו ב-CRM ונמחקו', description: 'לכן הם לא נוספו שוב.' });
         } else {
-          toast.show({ message: known === 1 ? 'העסק הזה כבר נמצא ב-CRM' : 'כל העסקים שבחרת כבר נמצאים ב-CRM' });
+          toast.show({
+            message: known + wasDeleted === 1 ? 'העסק הזה כבר נמצא ב-CRM' : 'כל העסקים שבחרת כבר נמצאים ב-CRM, או היו בו',
+            description: notAddedAgain(known, wasDeleted) || undefined,
+          });
         }
       } catch (error) {
         toast.error('הייבוא נכשל.', messageOf(error));

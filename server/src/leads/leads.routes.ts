@@ -13,7 +13,7 @@ const leadNotFound = () => new HttpError(404, 'הליד הזה כבר לא קי�
 
 /**
  * Mounted at /api/leads. Matches src/data/repository/http.ts in the frontend. `countryCode` reads local numbers
- * (054…) when matching phone numbers.
+ * (054…) when matching phone numbers; `timeZone` dates what the app is told (when a lead was deleted).
  */
 export function createLeadsRouter(
   stores: Stores,
@@ -21,6 +21,7 @@ export function createLeadsRouter(
   clock: () => Date,
   transcription: TranscriptionQueue | null = null,
   countryCode = '972',
+  timeZone = 'Asia/Jerusalem',
 ) {
   const router = Router();
   const store = stores.leads;
@@ -38,8 +39,16 @@ export function createLeadsRouter(
     throw new ConflictError('הליד הזה משתנה כרגע במקום אחר. נסו שוב.');
   }
 
-  /** Deletes leads with their timelines, coaching reports and recording files. */
+  /**
+   * Deletes leads with their timelines, coaching reports and recording files. What identified each business is
+   * kept, so it's recognised if it comes again (a new lead, an import, the Prospector).
+   */
   async function removeLeads(ids: string[]) {
+    const deletedAt = clock();
+    const doomed = await store.identities(ids);
+    await stores.deletedLeads.record(
+      doomed.map(({ id, name, phone, email, website, city, mapsUrl }) => ({ id, name, phone, email, website, city, mapsUrl, deletedAt })),
+    );
     // Recordings first, while their storage keys are still known. Their transcripts stop too.
     const files = await stores.media.removeForLeads(ids);
     for (const file of files) transcription?.cancel(file.id);
@@ -60,8 +69,18 @@ export function createLeadsRouter(
     res.json(await store.list());
   });
 
+  /**
+   * The deleted leads, as what identified each business, newest first: the app tells a new lead or a pasted one
+   * was in the CRM before. Before /:id routes, so "deleted" isn't read as an id.
+   */
+  router.get('/deleted', async (_req, res) => {
+    res.json(await stores.deletedLeads.list());
+  });
+
   router.post('/', async (req, res) => {
     const lead = await store.create(LeadInput.parse(req.body));
+    // A deleted lead saved again (its deletion undone) isn't a deleted one anymore
+    await stores.deletedLeads.forget([lead.id]);
     res.status(201).json(lead);
   });
 
@@ -69,21 +88,24 @@ export function createLeadsRouter(
   router.post('/bulk', async (req, res) => {
     const { leads } = BulkCreateBody.parse(req.body);
     const result = await store.createMany(leads);
+    await stores.deletedLeads.forget(result.created.map((lead) => lead.id));
     res.status(201).json(result);
   });
 
   /**
    * Leads pasted as a JSON array: [{ name, phone, source, niche, notes }], each field found by any of its usual
    * names, or from the key chosen for it in the address (?name=title&phone=mobile&niche=category). Before the
-   * insert, the numbers already on a lead are looked up in the database, and they (in any format) and numbers
-   * repeated in the paste are filtered out, so only leads with new numbers are saved, every one as a new lead
-   * ("חדש"). A lead whose number is in the paste gets what it's missing of the city, the Maps link and the
-   * website. Answers what was created, what was filled in, and what was skipped and why.
+   * insert, every business is looked up among the leads and the deleted leads (by number in any format, Google
+   * Maps place, website, email, or name and city: identity.ts), and so are the ones repeated in the paste: only new
+   * businesses are saved, every one as a new lead ("חדש"). One that was deleted is skipped with the date. A lead
+   * that's in the paste gets what it's missing of its number, city, Maps link and website. Answers what was
+   * created, what was filled in, and what was skipped and why.
    */
   router.post('/import-json', async (req, res) => {
     const items = JsonImportBody.parse(req.body);
     const mapping = JsonMappingQuery.parse(req.query);
-    const plan = planJsonImport(items, await store.phones(), countryCode, mapping);
+    const [current, deleted] = await Promise.all([store.identities(), stores.deletedLeads.list()]);
+    const plan = planJsonImport(items, [...current, ...deleted], countryCode, mapping, timeZone);
     const skipped: JsonSkip[] = [...plan.skipped];
     const now = clock().getTime();
     const inputs: LeadInput[] = [];

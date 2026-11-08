@@ -973,6 +973,22 @@ describe('Prospector API', () => {
     expect((await agent.get('/api/leads').expect(200)).body.map((lead: { id: string }) => lead.id)).toContain(garage.id);
   });
 
+  it('skips a business that was a lead and was deleted, and still knows the ones that are leads', async () => {
+    const leads = (await agent.get('/api/leads').expect(200)).body as { id: string; name: string }[];
+    const studio = leads.find((lead) => lead.name === 'סטודיו כוח')!;
+    await agent.delete(`/api/leads/${studio.id}`).expect(204);
+
+    const started = (await agent.post('/api/prospector/searches').send({ niche: 'מוסכים', location: 'טבריה', limit: 20 }).expect(202)).body;
+    await waitForSearch(stores, started.id);
+    const { body } = await agent.get(`/api/prospector/searches/${started.id}`).expect(200);
+    const found = (name: string) => body.prospects.find((prospect: { name: string }) => prospect.name === name);
+    expect(found('מוסך הגליל').existingLeadId).toBe(leads.find((lead) => lead.name === 'מוסך הגליל')!.id);
+    // Not a lead anymore, so it isn't marked as one; importing it says why it isn't added again
+    expect(found('סטודיו כוח').existingLeadId).toBeNull();
+    const imported = (await agent.post('/api/prospector/import').send({ ids: [found('סטודיו כוח').id] }).expect(201)).body;
+    expect(imported).toEqual({ created: [], skipped: [{ id: found('סטודיו כוח').id, reason: 'deleted' }] });
+  });
+
   it('checks one site again on request', async () => {
     const started = (await agent.post('/api/prospector/searches').send({ niche: 'סטודיו', location: 'טבריה', limit: 20 }).expect(202)).body;
     await waitForSearch(stores, started.id);

@@ -275,7 +275,8 @@ export class ProspectorEngine {
     if (provider !== search.provider || fallbackFrom || notice) {
       await this.deps.stores.prospector.updateSearch(search.id, { provider, fallbackFrom, notice });
     }
-    const matcher = new LeadMatcher(await this.deps.stores.leads.list(), this.deps.settings.countryCode);
+    const [leads, deleted] = await Promise.all([this.deps.stores.leads.identities(), this.deps.stores.deletedLeads.list()]);
+    const matcher = new LeadMatcher([...leads, ...deleted], this.deps.settings.countryCode);
     const records: NewProspect[] = places.map((place, position) => {
       const website = cleanWebsite(place.website);
       return {
@@ -285,7 +286,7 @@ export class ProspectorEngine {
         searchId: search.id,
         position,
         domain: website ? domainOf(website) : '',
-        existingLeadId: matcher.find({ ...place, website }),
+        existingLeadId: matcher.find({ ...place, website }, search.location),
         importedLeadId: null,
         importedAt: null,
         analysis: emptyAnalysis(),

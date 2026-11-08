@@ -1,6 +1,7 @@
 import type {
   CoachingReport,
   DailyQueue,
+  DeletedLead,
   Features,
   Interaction,
   Lead,
@@ -66,8 +67,9 @@ export async function readErrorMessage(response: Response): Promise<string> {
  *   POST   /leads                       NewLead → Lead   (its notes become timeline notes)
  *   POST   /leads/bulk                  { leads: NewLead[] } → { created: Lead[], skippedIds: string[] }  (max 500)
  *   POST   /leads/import-json           [{ name, phone, … }] or { data: [ … ] }, any usual field names → 201 { created: Lead[], skipped, ignoredFields }
- *                                       (max 1000; numbers already on a lead or repeated in the paste are skipped)
- *   POST   /leads/bulk-delete          { ids: string[] } → 204   (max 500, with timelines and recordings)
+ *                                       (max 1000; businesses that are a lead, were one, or repeat in the paste are skipped)
+ *   POST   /leads/bulk-delete          { ids: string[] } → 204   (max 500, with timelines and recordings; each business is remembered)
+ *   GET    /leads/deleted               → DeletedLead[]   (newest first; a lead saved again is forgotten)
  *   PATCH  /leads/:id                   LeadPatch → Lead   (deal amounts and currency only on a closed deal; amounts merge)
  *   POST   /leads/:id/actions           LeadAction & { body?, channel?, at? } → Lead   (also logs a timeline entry; `at` for a step sent late)
  *   POST   /leads/:id/actions/:actionId/undo → Lead   (latest action, within 10 minutes)
@@ -177,6 +179,7 @@ export function createHttpRepository(baseUrl: string): LeadRepository {
       return request<JsonImportResult>(`/leads/import-json${chosen ? `?${chosen}` : ''}`, json('POST', items));
     },
     removeMany: (ids) => request<void>('/leads/bulk-delete', { ...json('POST', { ids }), keepalive: true }),
+    deletedLeads: () => request<DeletedLead[]>('/leads/deleted'),
     update: (id, patch: LeadPatch) => request<Lead>(leadPath(id), json('PATCH', patch)),
     act: (id, action, details = {}) => request<Lead>(`${leadPath(id)}/actions`, json('POST', { ...action, ...details })),
     undo: (id, actionId) =>

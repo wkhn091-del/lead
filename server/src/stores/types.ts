@@ -143,15 +143,40 @@ export interface PoolCandidate {
 /** A change to a lead's details, with the deal's amounts already merged into a whole set */
 export type LeadUpdate = Omit<LeadPatch, 'deal'> & { deal?: DealTerms };
 
+/** What identifies a lead: its business's name, number, site, email, city and Maps listing */
+export type LeadIdentityRecord = Pick<LeadRecord, 'id' | 'name' | 'phone' | 'email' | 'website' | 'city' | 'mapsUrl' | 'archivedAt'>;
+
+/** A deleted lead, kept as what identified its business (the lead's own id) */
+export interface DeletedLeadRecord {
+  id: string;
+  name: string;
+  phone: string;
+  email: string;
+  website: string;
+  city: string;
+  mapsUrl: string;
+  deletedAt: Date;
+}
+
+/** The deleted leads, so a business that was in the CRM is recognised when it comes again */
+export interface DeletedLeadStore {
+  /** Newest first */
+  list(): Promise<DeletedLeadRecord[]>;
+  /** Remembers these (a lead deleted again is remembered as it was the last time) */
+  record(leads: DeletedLeadRecord[]): Promise<void>;
+  /** Forgets these: leads that were restored */
+  forget(ids: string[]): Promise<void>;
+}
+
 /** Data access for leads: MongoDB through Prisma (the tests also run on an in-memory copy, test/memory-stores.ts). */
 export interface LeadStore {
   list(): Promise<LeadRecord[]>;
   get(id: string): Promise<LeadRecord | null>;
   /**
-   * Every lead that has a phone number: its id, name and the number as stored, to match numbers without whole
-   * leads, and the details an import may fill in when they're missing (city, Maps link, website)
+   * What identifies each lead (server/src/leads/identity.ts), without whole leads: to tell whether a business is
+   * already one, and to fill in what an import finds missing. Only the leads with these ids, when given.
    */
-  phones(): Promise<Pick<LeadRecord, 'id' | 'name' | 'phone' | 'city' | 'mapsUrl' | 'website'>[]>;
+  identities(ids?: string[]): Promise<LeadIdentityRecord[]>;
   /** Throws ConflictError when the id is taken */
   create(input: LeadInput): Promise<LeadRecord>;
   /** Creates every lead with a new id in one write */
@@ -384,6 +409,7 @@ export const freshPractice = (now: Date): PracticeState => ({
 
 export interface Stores {
   leads: LeadStore;
+  deletedLeads: DeletedLeadStore;
   interactions: InteractionStore;
   media: MediaStore;
   coaching: CoachingStore;

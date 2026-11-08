@@ -2,6 +2,7 @@ import type {
   CoachingReport,
   CoachLanguage,
   DailyQueue,
+  DeletedLead,
   Features,
   Grade,
   Interaction,
@@ -81,8 +82,9 @@ export interface LeadRepository {
   createMany(leads: NewLead[]): Promise<BulkCreateResult>;
   /**
    * Leads pasted as a JSON array of { name, phone, source, niche, notes }, up to 1,000 at once, each field found by
-   * any of its usual names or from the key `mapping` chose for it. Only leads whose phone number isn't on any lead
-   * yet are stored, every one as a new lead; the rest come back in `skipped` with the reason.
+   * any of its usual names or from the key `mapping` chose for it. Only businesses that aren't a lead and weren't
+   * one (deleted) are stored, every one as a new lead; the rest come back in `skipped` with the reason, and leads
+   * already here that the paste completes in `updated`.
    */
   importJson(items: unknown[], mapping?: JsonMapping): Promise<JsonImportResult>;
   /** Details only. A value can be set once the deal is closed. */
@@ -96,6 +98,8 @@ export interface LeadRepository {
   undo(id: string, actionId: string): Promise<Lead>;
   remove(id: string): Promise<void>;
   removeMany(ids: string[]): Promise<void>;
+  /** The leads that were deleted, newest first, as what identified each business. A lead saved again is forgotten. */
+  deletedLeads(): Promise<DeletedLead[]>;
   /** Today's queue, drawn on the first request of the day */
   daily(): Promise<DailyQueue>;
   /** For the dashboard: when each lead in play was last touched, and the gist of its deal analysis */

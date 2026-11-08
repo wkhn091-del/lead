@@ -1,4 +1,7 @@
-import { internationalDigits } from '../lib/phone.js';
+import { phoneKey } from '../lib/phone.js';
+import { deletedDate, IdentityIndex, LeadRegistry, sharedText, type Duplicate, type IdentityKey, type IdentitySource, type KnownLead } from './identity.js';
+
+export { phoneKey };
 
 /**
  * Leads pasted or uploaded as JSON, checked before anything is saved. Every export names its fields its own way
@@ -164,7 +167,7 @@ export type MappableField = (typeof MAPPABLE_FIELDS)[number];
 /** A key chosen by hand for a field: "title", or "contact.phone" one level down. It's read first, for that field only. */
 export type JsonMapping = Partial<Record<MappableField, string>>;
 
-export type JsonSkipReason = 'invalid' | 'no-phone' | 'exists' | 'repeated';
+export type JsonSkipReason = 'invalid' | 'no-phone' | 'exists' | 'deleted' | 'repeated';
 
 export interface JsonSkip {
   /** The item's place in the array that was sent, from 0 */
@@ -174,10 +177,14 @@ export interface JsonSkip {
   reason: JsonSkipReason;
   /** Why, in Hebrew, as the app shows it */
   message: string;
-  /** The lead that already has this number ('exists') */
+  /** The lead this business already is ('exists') */
   leadId?: string;
-  /** The item this number first came in ('repeated'), from 0 */
+  /** The item this business first came in ('repeated'), from 0 */
   firstIndex?: number;
+  /** What made it the same business ('exists', 'deleted', 'repeated') */
+  matchedBy?: IdentityKey;
+  /** When the lead it was is deleted ('deleted'), ISO */
+  deletedAt?: string;
 }
 
 /** A lead to create. The caller gives it an id and times. */
@@ -203,7 +210,7 @@ export interface JsonLeadFill {
   /** The lead filled in */
   id: string;
   name: string;
-  details: Partial<Pick<JsonLeadDraft, 'city' | 'mapsUrl' | 'website'>>;
+  details: Partial<Pick<JsonLeadDraft, 'phone' | 'city' | 'mapsUrl' | 'website'>>;
 }
 
 export interface JsonImportPlan {
@@ -215,15 +222,11 @@ export interface JsonImportPlan {
   ignoredFields: string[];
 }
 
-/** What's needed of a lead already in the CRM: to match its number, and to fill in what it's missing */
-export interface ExistingLead {
-  id: string;
-  name: string;
-  phone: string;
-  city?: string;
-  mapsUrl?: string;
-  website?: string;
-}
+/**
+ * What's needed of a lead in the CRM, or of a deleted one (`deletedAt` set): to tell a business is already there
+ * or was (identity.ts), and to fill in what it's missing. A detail that's undefined is unknown, so it isn't filled.
+ */
+export type ExistingLead = KnownLead;
 
 // The limits of any new lead (leads.schemas.ts), so a long value is shortened instead of failing the item
 const NAME_LIMIT = 120;
@@ -233,24 +236,10 @@ const NOTE_LIMIT = 5000;
 const EMAIL_LIMIT = 254;
 const WEBSITE_LIMIT = 500;
 /** Israel's national numbers after 972: mobile and VoIP (9 digits), landlines (8), 1-800 and the like */
-const ISRAELI_NATIONAL = /^(?:5\d{8}|7\d{8}|[2-489]\d{7}|1(?:599|700|800)\d{6})$/;
 /** A domain or an http(s) address: the rule every lead's website is held to (leads.schemas.ts, src/lib/website.ts) */
 export const WEBSITE = /^(https?:\/\/)?[^\s/?#:@]+\.[^\s/?#:@]{2,}(:\d{1,5})?([/?#]\S*)?$/i;
 /** The email format the server takes (zod's z.email()), so an email can't cost a lead */
 const EMAIL = /^(?:[A-Za-z0-9_'+-]+\.)*[A-Za-z0-9_'+-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9-]*\.)+[A-Za-z]{2,}$/;
-
-/**
- * A number as international digits, the same way whoever wrote it: 054-1234567, 0541234567, +972 54-123-4567
- * and "+972 054…" (the local 0 kept after the country code) are all 972541234567. Null when it can't be a number.
- */
-export function phoneKey(phone: string, countryCode: string): string | null {
-  let digits = internationalDigits(phone, countryCode);
-  if (!digits) return null;
-  if (digits.startsWith('9720')) digits = `972${digits.slice(4)}`;
-  // An Israeli number has a known length, so a number cut short isn't saved as if it were one
-  if (digits.startsWith('972') && !ISRAELI_NATIONAL.test(digits.slice(3))) return null;
-  return digits;
-}
 
 /** 054-123-4567 for a mobile, 03-123-4567 for a landline, 1-800-123-456; other countries as +digits */
 export function displayPhone(key: string): string {
@@ -613,23 +602,56 @@ export function leadList(value: unknown, depth = 0): unknown[] | null {
   return null;
 }
 
-/**
- * What each item becomes, and what's skipped and why. `existing` is every lead in the CRM that has a phone;
- * `mapping`, the keys chosen by hand for the business name, the phone and the niche.
- */
-export function planJsonImport(items: readonly unknown[], existing: readonly ExistingLead[], countryCode: string, mapping: JsonMapping = {}): JsonImportPlan {
-  const known = new Map<string, ExistingLead>();
-  for (const lead of existing) {
-    const key = phoneKey(lead.phone, countryCode);
-    // A copy: what an item fills in is remembered here, not written on the caller's list
-    if (key && !known.has(key)) known.set(key, { ...lead });
+/** Why an item is a lead that's already in the CRM */
+function existsMessage(found: Duplicate<ExistingLead>, source: IdentitySource): string {
+  const name = `״${clip(found.lead.name, 60)}״${found.lead.archivedAt ? ' (מסומן כלא רלוונטי)' : ''}`;
+  switch (found.by) {
+    case 'phone':
+      return `המספר כבר שמור בליד ${name}.`;
+    case 'place':
+      return `המקום הזה בגוגל מפות כבר שמור בליד ${name}.`;
+    case 'site':
+      return `האתר הזה כבר שמור בליד ${name}.`;
+    case 'email':
+      return `האימייל הזה כבר שמור בליד ${name}.`;
+    case 'name':
+      return `כבר יש ליד באותו שם${sharedText('name', source, found.lead) === 'אותו שם ועיר' ? ' ובאותה עיר' : ''}: ${name}.`;
   }
-  const first = new Map<string, number>();
+}
+
+/** Why an item repeats one earlier in the list */
+const REPEATED: Record<IdentityKey, string> = {
+  phone: 'המספר הזה כבר מופיע קודם ברשימה.',
+  place: 'המקום הזה בגוגל מפות כבר מופיע קודם ברשימה.',
+  site: 'האתר הזה כבר מופיע קודם ברשימה.',
+  email: 'האימייל הזה כבר מופיע קודם ברשימה.',
+  name: 'עסק באותו שם כבר מופיע קודם ברשימה.',
+};
+
+/**
+ * What each item becomes, and what's skipped and why. `existing` is every lead in the CRM, and every deleted one
+ * (with `deletedAt`); `mapping`, the keys chosen by hand for the business name, the phone and the niche. An item
+ * that's a lead already completes it (its number, city, Maps link or website, where the lead has none); one that was
+ * deleted is skipped, with the date, in `timeZone`.
+ */
+export function planJsonImport(
+  items: readonly unknown[],
+  existing: readonly ExistingLead[],
+  countryCode: string,
+  mapping: JsonMapping = {},
+  timeZone = 'Asia/Jerusalem',
+): JsonImportPlan {
+  // Copies: what an item fills in is remembered here, not written on the caller's list
+  const registry = new LeadRegistry<ExistingLead>(
+    existing.map((lead) => ({ ...lead })),
+    countryCode,
+  );
+  const listed = new IdentityIndex<IdentitySource & { index: number }>(countryCode);
   const ignored = new Set<string>();
   const plan: JsonImportPlan = { leads: [], skipped: [], fills: [], ignoredFields: [] };
 
   items.forEach((item, index) => {
-    const skip = (reason: JsonSkipReason, message: string, name = '', phone = '', extra: Pick<JsonSkip, 'leadId' | 'firstIndex'> = {}) =>
+    const skip = (reason: JsonSkipReason, message: string, name = '', phone = '', extra: Pick<JsonSkip, 'leadId' | 'firstIndex' | 'matchedBy' | 'deletedAt'> = {}) =>
       plan.skipped.push({ index, name: clip(name, NAME_LIMIT), phone: clip(phone, 40), reason, message, ...extra });
 
     if (!isObject(item)) {
@@ -666,34 +688,54 @@ export function planJsonImport(items: readonly unknown[], existing: readonly Exi
     const city = clip(best(fields.city, firstText)?.text ?? '', CITY_LIMIT);
     const links = all('link', fields.link);
     const mapsUrl = links.find((link) => link.length <= WEBSITE_LIMIT && MAPS_LINK.test(link) && !/\s/.test(link)) ?? '';
+    const emails = all('email', fields.email);
+    const email = emails.find((value) => value.length <= EMAIL_LIMIT && EMAIL.test(value)) ?? '';
+    const phone = displayPhone(key);
+    const business: IdentitySource = { name, phone, email, website, city, mapsUrl };
 
-    const match = known.get(key);
-    if (match) {
+    const found = registry.find(business);
+    if (found?.deleted) {
+      const deletedAt = found.lead.deletedAt ? new Date(found.lead.deletedAt) : null;
+      const when = deletedAt ? ` ב-${deletedDate(deletedAt, timeZone)}` : '';
+      skip(
+        'deleted',
+        `העסק הזה כבר היה ב-CRM בתור ״${clip(found.lead.name, 60)}״ ונמחק${when} (${sharedText(found.by, business, found.lead)}).`,
+        name,
+        shownPhone,
+        { matchedBy: found.by, ...(deletedAt ? { deletedAt: deletedAt.toISOString() } : {}) },
+      );
+      return;
+    }
+    if (found) {
+      const match = found.lead;
       // Already a lead: it isn't made again, but what it's missing of these is filled in
       const details = Object.fromEntries(
         (
           [
+            ['phone', phone, match.phone],
             ['city', city, match.city],
             ['mapsUrl', mapsUrl, match.mapsUrl],
             ['website', website, match.website],
           ] as const
-        ).filter(([, found, current]) => found && current !== undefined && !current.trim()).map(([field, found]) => [field, found]),
+        ).filter(([, value, current]) => value && current !== undefined && !current.trim()).map(([field, value]) => [field, value]),
       ) as JsonLeadFill['details'];
       if (Object.keys(details).length > 0) {
         plan.fills.push({ index, id: match.id, name: clip(match.name, NAME_LIMIT), details });
-        // The same number further down the list has nothing more to give this lead
+        // The same business further down the list has nothing more to give this lead, and what it was given
+        // (a Maps link, a site) now tells it apart too
         Object.assign(match, details);
+        registry.add(match);
         return;
       }
-      skip('exists', `המספר כבר שמור בליד ״${clip(match.name, 60)}״.`, name, shownPhone, { leadId: match.id });
+      skip('exists', existsMessage(found, business), name, shownPhone, { leadId: match.id, matchedBy: found.by });
       return;
     }
-    const earlier = first.get(key);
-    if (earlier !== undefined) {
-      skip('repeated', 'המספר הזה כבר מופיע קודם ברשימה.', name, shownPhone, { firstIndex: earlier });
+    const earlier = listed.find(business);
+    if (earlier) {
+      skip('repeated', REPEATED[earlier.by], name, shownPhone, { firstIndex: earlier.lead.index, matchedBy: earlier.by });
       return;
     }
-    first.set(key, index);
+    listed.add({ ...business, index });
 
     // Next to a business or company name, a plain "name" is the person to ask for
     let contactName = best(fields.contactName, firstText)?.text ?? '';
@@ -703,8 +745,6 @@ export function planJsonImport(items: readonly unknown[], existing: readonly Exi
       if (personName && personName !== name) contactName = personName;
     }
 
-    const emails = all('email', fields.email);
-    const email = emails.find((value) => value.length <= EMAIL_LIMIT && EMAIL.test(value)) ?? '';
     const otherPhones = unique(keys.filter((other): other is string => Boolean(other) && other !== key).map(displayPhone));
     const otherEmails = emails.filter((value) => value !== email);
     const otherSites = websites.filter((value) => value !== website);
@@ -730,7 +770,7 @@ export function planJsonImport(items: readonly unknown[], existing: readonly Exi
       index,
       name: clip(name, NAME_LIMIT),
       contactName: clip(contactName, NAME_LIMIT),
-      phone: displayPhone(key),
+      phone,
       email,
       website,
       city,

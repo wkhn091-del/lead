@@ -10,6 +10,7 @@ import {
   type ChatLine,
   type CoachingStore,
   type DailyStore,
+  type DeletedLeadStore,
   type InteractionRecord,
   type InteractionStore,
   type LatestEntries,
@@ -155,13 +156,18 @@ export function createPrismaStores(prisma: PrismaClient): Stores {
       return rows.map(toLead);
     },
     get: findLead,
-    async phones() {
+    async identities(ids) {
       // Only these fields come back from MongoDB, whatever the number of leads
       const rows = await prisma.lead.findMany({
-        where: { phone: { not: '' } },
-        select: { id: true, name: true, phone: true, city: true, mapsUrl: true, website: true },
+        where: ids ? { id: { in: ids } } : undefined,
+        select: { id: true, name: true, phone: true, email: true, website: true, city: true, mapsUrl: true, archivedAt: true },
       });
-      return rows.map((row) => ({ ...row, city: row.city ?? '', mapsUrl: row.mapsUrl ?? '' }));
+      return rows.map((row) => ({
+        ...row,
+        city: row.city ?? '',
+        mapsUrl: row.mapsUrl ?? '',
+        archivedAt: row.archivedAt ?? null,
+      }));
     },
     async create(input) {
       try {
@@ -650,5 +656,21 @@ export function createPrismaStores(prisma: PrismaClient): Stores {
     },
   };
 
-  return { leads, interactions, media, coaching, daily, training, prospector };
+  const deletedLeads: DeletedLeadStore = {
+    async list() {
+      return prisma.deletedLead.findMany({ orderBy: { deletedAt: 'desc' } });
+    },
+    async record(records) {
+      if (!records.length) return;
+      // A lead deleted again replaces what was kept of it
+      await prisma.deletedLead.deleteMany({ where: { id: { in: records.map((record) => record.id) } } });
+      await prisma.deletedLead.createMany({ data: records });
+    },
+    async forget(ids) {
+      if (!ids.length) return;
+      await prisma.deletedLead.deleteMany({ where: { id: { in: ids } } });
+    },
+  };
+
+  return { leads, deletedLeads, interactions, media, coaching, daily, training, prospector };
 }

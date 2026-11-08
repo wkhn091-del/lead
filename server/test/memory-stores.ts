@@ -6,6 +6,7 @@ import {
   notesAsInteractions,
   splitById,
   type CoachingRecord,
+  type DeletedLeadRecord,
   type InteractionRecord,
   type LatestEntries,
   type LeadRecord,
@@ -34,6 +35,7 @@ function stamp(): Date {
  */
 export function createMemoryStores(): Stores {
   const leads = new Map<string, LeadRecord>();
+  const deleted = new Map<string, DeletedLeadRecord>();
   const interactions = new Map<string, InteractionRecord>();
   const media = new Map<string, MediaRecord>();
   const reports: CoachingRecord[] = [];
@@ -69,10 +71,11 @@ export function createMemoryStores(): Stores {
         const lead = leads.get(id);
         return lead ? copy(lead) : null;
       },
-      async phones() {
+      async identities(ids) {
+        const wanted = ids ? new Set(ids) : null;
         return [...leads.values()]
-          .filter((lead) => lead.phone !== '')
-          .map(({ id, name, phone, city, mapsUrl, website }) => ({ id, name, phone, city, mapsUrl, website }));
+          .filter((lead) => !wanted || wanted.has(lead.id))
+          .map(({ id, name, phone, email, website, city, mapsUrl, archivedAt }) => copy({ id, name, phone, email, website, city, mapsUrl, archivedAt }));
       },
       async create(input) {
         if (leads.has(input.id)) throw new ConflictError('כבר קיים ליד עם המזהה הזה.');
@@ -111,6 +114,17 @@ export function createMemoryStores(): Stores {
           }));
       },
       async ping() {},
+    },
+    deletedLeads: {
+      async list() {
+        return [...deleted.values()].sort((a, b) => b.deletedAt.getTime() - a.deletedAt.getTime()).map(copy);
+      },
+      async record(records) {
+        for (const record of records) deleted.set(record.id, copy(record));
+      },
+      async forget(ids) {
+        for (const id of ids) deleted.delete(id);
+      },
     },
     interactions: {
       async list(leadId) {

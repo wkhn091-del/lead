@@ -1,9 +1,7 @@
 import { randomUUID } from 'node:crypto';
+import { LeadRegistry, type Duplicate, type IdentitySource, type KnownLead } from '../leads/identity.js';
 import { LeadInput } from '../leads/leads.schemas.js';
-import type { LeadRecord } from '../stores/types.js';
-import { internationalDigits } from '../lib/phone.js';
-import { domainOf, notAWebsite } from './site.js';
-import type { ProspectRecord, ProspectSearchRecord } from './types.js';
+import type { DiscoveredPlace, ProspectRecord, ProspectSearchRecord } from './types.js';
 
 /**
  * Prospects becoming leads. An imported business starts at Cold Call like any import, so it joins the pool the
@@ -19,40 +17,45 @@ export const SCORE_LABEL: Record<number, string> = {
   1: 'פרימיום',
 };
 
-/** Leads already in the CRM, by phone and by their own website's domain */
-export class LeadMatcher {
-  private readonly byPhone = new Map<string, string>();
-  private readonly byDomain = new Map<string, string>();
+type FoundPlace = Pick<DiscoveredPlace, 'name' | 'phone' | 'phoneIntl' | 'website' | 'mapsUrl' | 'placeId'>;
 
-  constructor(leads: readonly Pick<LeadRecord, 'id' | 'phone' | 'website'>[], private readonly countryCode: string) {
-    for (const lead of leads) {
-      const digits = internationalDigits(lead.phone, countryCode);
-      if (digits && !this.byPhone.has(digits)) this.byPhone.set(digits, lead.id);
-      const domain = ownDomain(lead.website);
-      if (domain && !this.byDomain.has(domain)) this.byDomain.set(domain, lead.id);
-    }
-  }
-
-  find(prospect: Pick<ProspectRecord, 'phoneIntl' | 'phone' | 'website'>): string | null {
-    const digits = prospect.phoneIntl || internationalDigits(prospect.phone, this.countryCode);
-    const byPhone = digits ? this.byPhone.get(digits) : undefined;
-    if (byPhone) return byPhone;
-    const domain = ownDomain(prospect.website);
-    return (domain && this.byDomain.get(domain)) || null;
-  }
-
-  add(lead: Pick<LeadRecord, 'id' | 'phone' | 'website'>) {
-    const digits = internationalDigits(lead.phone, this.countryCode);
-    if (digits) this.byPhone.set(digits, lead.id);
-    const domain = ownDomain(lead.website);
-    if (domain) this.byDomain.set(domain, lead.id);
-  }
+/** A business Google found, as it's matched: its number (international when Google gave one), site and place */
+function businessOf(place: FoundPlace, area: string): IdentitySource {
+  return {
+    name: place.name,
+    phone: place.phoneIntl ? `+${place.phoneIntl}` : place.phone,
+    website: place.website,
+    // Its place id names it even when the listing's link doesn't
+    mapsUrl: place.placeId ? `https://www.google.com/maps/place/?q=place_id:${place.placeId}` : place.mapsUrl,
+    city: area,
+  };
 }
 
-/** A website's domain, unless the link is a Facebook page, a directory listing or the like (shared by many businesses) */
-export function ownDomain(website: string): string {
-  if (!website.trim() || notAWebsite(website)) return '';
-  return domainOf(website);
+/**
+ * The leads in the CRM and the deleted ones, to tell whether a business Google found is already a lead or was one:
+ * the same number, Maps place, website, or name in the searched area (leads/identity.ts).
+ */
+export class LeadMatcher {
+  private readonly registry: LeadRegistry<KnownLead>;
+
+  constructor(leads: Iterable<KnownLead>, countryCode: string) {
+    this.registry = new LeadRegistry(leads, countryCode);
+  }
+
+  /** The lead in the CRM the business already is, or null (a deleted one isn't a lead) */
+  find(place: FoundPlace, area = ''): string | null {
+    const found = this.check(place, area);
+    return found && !found.deleted ? found.lead.id : null;
+  }
+
+  /** The lead the business is, or was before it was deleted */
+  check(place: FoundPlace, area = ''): Duplicate<KnownLead> | null {
+    return this.registry.find(businessOf(place, area));
+  }
+
+  add(lead: KnownLead) {
+    this.registry.add(lead);
+  }
 }
 
 /** "חדרי כושר · תל אביב", within the campaign field's 60 characters */

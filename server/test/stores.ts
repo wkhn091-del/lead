@@ -35,6 +35,7 @@ export async function createTestStores(): Promise<TestStores> {
   await prisma.media.deleteMany();
   await prisma.coachingReport.deleteMany();
   await prisma.lead.deleteMany();
+  await prisma.deletedLead.deleteMany();
   await prisma.dailyQueue.deleteMany();
   await prisma.objectionCard.deleteMany();
   await prisma.objectionVariant.deleteMany();

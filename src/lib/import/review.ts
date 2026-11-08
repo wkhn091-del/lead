@@ -1,67 +1,41 @@
+import { IdentityIndex, LeadRegistry, type IdentitySource, type KnownLead } from '../../../server/src/leads/identity';
+import { appConfig } from '../../config';
 import { NO_DEAL } from '../deal';
 import { createId } from '../id';
-import { toInternational } from '../phone';
-import type { ContactMethod, Currency, Lead, NewLead } from '../../types';
+import type { ContactMethod, Currency, DeletedLead, Lead, NewLead } from '../../types';
 import type { ParsedRow } from './parse';
 
-export type RowIssue = 'missing-name' | 'in-crm' | 'repeated';
+export type RowIssue = 'missing-name' | 'in-crm' | 'deleted' | 'repeated';
 
 export interface ReviewedRow extends ParsedRow {
   issue: RowIssue | null;
-  /** Name of the existing lead or earlier row this one matches */
+  /** Name of the lead (in the CRM or deleted) or the earlier row this one is */
   match: string | null;
+  /** When the lead it was is deleted ('deleted'), ISO */
+  deletedAt?: string | null;
 }
 
-interface Contact {
-  name: string;
-  phone: string;
-  email: string;
-}
-
-const nameKey = (name: string) =>
-  name
-    .toLocaleLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, ' ')
-    .trim();
-
-/** Finds a lead by phone (in any format), email, or name when one side has no contact details. */
-class ContactIndex {
-  private phones = new Map<string, string>();
-  private emails = new Map<string, string>();
-  private names = new Map<string, { name: string; reachable: boolean }>();
-
-  add({ name, phone, email }: Contact) {
-    const phoneKey = phone ? toInternational(phone) : null;
-    if (phoneKey && !this.phones.has(phoneKey)) this.phones.set(phoneKey, name);
-    if (email && !this.emails.has(email.toLowerCase())) this.emails.set(email.toLowerCase(), name);
-    const key = nameKey(name);
-    if (key && !this.names.has(key)) this.names.set(key, { name, reachable: Boolean(phone || email) });
-  }
-
-  find({ name, phone, email }: Contact): string | null {
-    const phoneKey = phone ? toInternational(phone) : null;
-    if (phoneKey && this.phones.has(phoneKey)) return this.phones.get(phoneKey) ?? null;
-    if (email && this.emails.has(email.toLowerCase())) return this.emails.get(email.toLowerCase()) ?? null;
-    // Same name: a duplicate unless both have different contact details (two branches of one business).
-    const named = this.names.get(nameKey(name));
-    if (named && (!named.reachable || (!phone && !email))) return named.name;
-    return null;
-  }
-}
-
-/** Flags rows without a name, rows already in the CRM, and rows that repeat earlier in the paste. */
-export function reviewRows(rows: readonly ParsedRow[], existing: readonly Lead[]): ReviewedRow[] {
-  const crm = new ContactIndex();
-  for (const lead of existing) crm.add(lead);
-  const paste = new ContactIndex();
+/**
+ * Flags rows without a name, businesses already in the CRM, ones that were and were deleted, and rows that repeat
+ * an earlier one: the same number (in any format), website, email, or name with nothing to tell them apart
+ * (server/src/leads/identity.ts, as the JSON import judges it).
+ */
+export function reviewRows(rows: readonly ParsedRow[], existing: readonly Lead[], deleted: readonly DeletedLead[] = []): ReviewedRow[] {
+  const crm = new LeadRegistry<KnownLead>([...existing, ...deleted], appConfig.defaultCountryCode);
+  const paste = new IdentityIndex<IdentitySource>(appConfig.defaultCountryCode);
 
   return rows.map((row) => {
     if (!row.name.trim()) return { ...row, issue: 'missing-name', match: null };
-    const inCrm = crm.find(row);
-    const repeated = inCrm ? null : paste.find(row);
-    paste.add(row);
-    if (inCrm) return { ...row, issue: 'in-crm', match: inCrm };
-    if (repeated) return { ...row, issue: 'repeated', match: repeated };
+    const business: IdentitySource = { name: row.name, phone: row.phone, email: row.email, website: row.website };
+    const inCrm = crm.find(business);
+    const repeated = inCrm ? null : paste.find(business);
+    paste.add(business);
+    if (inCrm?.deleted) {
+      const at = inCrm.lead.deletedAt;
+      return { ...row, issue: 'deleted', match: inCrm.lead.name, deletedAt: at ? new Date(at).toISOString() : null };
+    }
+    if (inCrm) return { ...row, issue: 'in-crm', match: inCrm.lead.name };
+    if (repeated) return { ...row, issue: 'repeated', match: repeated.lead.name };
     return { ...row, issue: null, match: null };
   });
 }

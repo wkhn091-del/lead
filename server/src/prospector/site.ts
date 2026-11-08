@@ -1,5 +1,8 @@
+import { domainOf, notOwnSite } from '../lib/web.js';
 import type { FetchedPage, FetchFailure } from './net.js';
 import type { SiteState } from './types.js';
+
+export { domainOf };
 
 /**
  * What a business's website link turns out to be before anything is scored: none, a social or directory
@@ -10,16 +13,6 @@ import type { SiteState } from './types.js';
 export interface SiteVerdict {
   state: SiteState;
   reason: string;
-}
-
-/** "https://www.Arbel.co.il/he?x=1" → "arbel.co.il" (a port other than the standard one stays: "biz.co.il:8080") */
-export function domainOf(url: string): string {
-  try {
-    const host = new URL(/^https?:\/\//i.test(url) ? url : `http://${url}`).host.toLowerCase();
-    return host.replace(/^www\d?\./, '').replace(/\.(?=:|$)/, '');
-  } catch {
-    return '';
-  }
 }
 
 /** The listing's link without tracking parameters (utm_source=gmb…), which Google listings often carry */
@@ -39,44 +32,9 @@ export function cleanWebsite(url: string): string {
   }
 }
 
-interface HostRule {
-  test: (host: string, path: string) => boolean;
-  reason: string;
-  /** A dead link rather than a page elsewhere */
-  dead?: boolean;
-}
-
-const hostIs = (...domains: string[]) => (host: string) => domains.some((domain) => host === domain || host.endsWith(`.${domain}`));
-
-/** Links that aren't a website of the business's own */
-const NOT_A_WEBSITE: HostRule[] = [
-  { test: hostIs('facebook.com', 'fb.com', 'fb.me'), reason: 'האתר הרשום בגוגל הוא רק עמוד פייסבוק' },
-  { test: hostIs('instagram.com'), reason: 'האתר הרשום בגוגל הוא רק עמוד אינסטגרם' },
-  { test: hostIs('linktr.ee', 'linkin.bio', 'beacons.ai', 'taplink.cc', 'bio.link', 'lnk.bio'), reason: 'האתר הרשום בגוגל הוא רק דף קישורים (Linktree וכדומה)' },
-  { test: (host) => host === 'wa.me' || hostIs('whatsapp.com')(host), reason: 'האתר הרשום בגוגל הוא רק קישור לוואטסאפ' },
-  { test: hostIs('tiktok.com', 'youtube.com', 'youtu.be', 'linkedin.com', 'twitter.com', 'x.com', 't.me'), reason: 'האתר הרשום בגוגל הוא רק עמוד ברשת חברתית' },
-  {
-    test: (host, path) => host === 'g.page' || host === 'maps.app.goo.gl' || (host === 'goo.gl' && path.startsWith('/maps')) || (hostIs('google.com', 'google.co.il')(host) && path.startsWith('/maps')),
-    reason: 'האתר הרשום בגוגל מפנה רק לפרופיל העסק בגוגל',
-  },
-  { test: hostIs('business.site'), reason: 'האתר הרשום הוא אתר "גוגל לעסקים", שגוגל סגרה ב-2024', dead: true },
-  { test: hostIs('b144.co.il', 'd.co.il', 'easy.co.il', '144.co.il', 'zap.co.il', 'yelp.com', 'tripadvisor.com', 'tripadvisor.co.il'), reason: 'האתר הרשום בגוגל הוא רק דף בספריית עסקים (B144, דפי זהב, איזי וכדומה)' },
-  { test: hostIs('wolt.com', '10bis.co.il', 'tenbis.co.il', 'mishloha.co.il'), reason: 'האתר הרשום בגוגל הוא רק דף במערכת הזמנות משלוחים' },
-  { test: hostIs('booking.com', 'airbnb.com', 'airbnb.co.il', 'zimmer.co.il', 'zimmeril.com'), reason: 'האתר הרשום בגוגל הוא רק דף באתר הזמנות' },
-];
-
 /** A listing link that isn't a site of their own, or null */
 export function notAWebsite(url: string): SiteVerdict | null {
-  let host = '';
-  let path = '';
-  try {
-    const parsed = new URL(/^https?:\/\//i.test(url.trim()) ? url.trim() : `http://${url.trim()}`);
-    host = parsed.hostname.toLowerCase().replace(/^www\./, '').replace(/^m\./, '');
-    path = parsed.pathname.toLowerCase();
-  } catch {
-    return null;
-  }
-  const rule = NOT_A_WEBSITE.find((candidate) => candidate.test(host, path));
+  const rule = notOwnSite(url);
   return rule ? { state: rule.dead ? 'broken' : 'social', reason: rule.reason } : null;
 }
 

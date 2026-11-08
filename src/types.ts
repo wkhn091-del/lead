@@ -394,6 +394,21 @@ export type LeadPatch = Partial<
   deal?: Partial<DealTerms>;
 };
 
+/**
+ * A lead that was deleted, kept as what identified its business, so a new lead or an import can say it was in the
+ * CRM before (server/src/leads/identity.ts). The id is the deleted lead's.
+ */
+export interface DeletedLead {
+  id: string;
+  name: string;
+  phone: string;
+  email: string;
+  website: string;
+  city: string;
+  mapsUrl: string;
+  deletedAt: string;
+}
+
 export interface NewLeadInput {
   name: string;
   contactName: string;
@@ -643,6 +658,6 @@ export interface NewProspectSearch {
 export interface ProspectImport {
   /** The new leads, at Cold Call: they join the Daily 10 pool */
   created: Lead[];
-  /** Businesses that weren't added: imported before, already a lead, or gone */
-  skipped: { id: string; reason: 'imported' | 'exists' | 'missing'; leadId?: string }[];
+  /** Businesses that weren't added: imported before, already a lead, a lead that was deleted, or gone */
+  skipped: { id: string; reason: 'imported' | 'exists' | 'deleted' | 'missing'; leadId?: string }[];
 }

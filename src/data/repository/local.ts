@@ -10,11 +10,11 @@ import { recordingKind, recordingProblem } from '../../lib/media';
 import { nicheCounts, nicheKey, nicheOf } from '../../lib/niche';
 import { review } from '../../lib/practice';
 import { safeStorage } from '../../lib/storage';
-import { phoneDigits } from '../../lib/phone';
 import { canImport, leadFromProspect } from '../../lib/prospects';
 import { applyAction, entryAfterUndo, timelineEntryFor, undoAction } from '../../lib/workflow';
 import type {
   CoachingReport,
+  DeletedLead,
   Interaction,
   Lead,
   LeadNote,
@@ -26,9 +26,10 @@ import type {
   Stage,
   TrainingDeck,
 } from '../../types';
-import { createSampleData } from '../sampleLeads';
+import { createSampleData, isSampleLead } from '../sampleLeads';
 import { createDemoSearch, DEMO_SEARCH_ID } from '../sampleProspector';
 import { createStarterDeck, rewordCommon } from '../starterDeck';
+import { LeadRegistry, type KnownLead } from '../../../server/src/leads/identity';
 import { planJsonImport } from '../../../server/src/leads/json-import';
 import { createBlobStore } from './blobs';
 import type { LeadRepository } from './types';
@@ -41,6 +42,8 @@ const COACHING_KEY = 'omek-crm:coaching:v1';
 const TRAINING_KEY = 'omek-crm:training:v1';
 /** Which businesses of the example Prospector search were imported, and as which lead */
 const PROSPECTOR_DEMO_KEY = 'omek-crm:prospector-demo:v1';
+/** The leads deleted in this browser, as what identified each business */
+const DELETED_KEY = 'omek-crm:deleted-leads:v1';
 
 // Said the way the preview (the app without a server) explains itself; PreviewBanner points to the connected app
 
@@ -227,8 +230,31 @@ export function createLocalRepository(): LeadRepository {
     return entry;
   };
 
+  const readDeleted = (): DeletedLead[] => {
+    const stored = readJson<unknown>(DELETED_KEY);
+    return Array.isArray(stored) ? (stored as DeletedLead[]) : [];
+  };
+  const saveDeleted = (records: DeletedLead[]) => safeStorage.set(DELETED_KEY, JSON.stringify(records));
+  /** Leads saved again (a deletion undone) aren't deleted ones anymore */
+  const undelete = (ids: readonly string[]) => {
+    const back = new Set(ids);
+    const records = readDeleted();
+    if (records.some((record) => back.has(record.id))) saveDeleted(records.filter((record) => !back.has(record.id)));
+  };
+  /** The leads here and the deleted ones, to tell whether a business is or was a lead (server/src/leads/identity.ts) */
+  const known = (): KnownLead[] => [...read(), ...readDeleted()];
+
   const forget = async (ids: readonly string[]) => {
     const doomed = new Set(ids);
+    // What identified each business is kept, so it's recognised if it comes again. The examples are only examples.
+    const deletedAt = new Date().toISOString();
+    const gone = read()
+      .filter((lead) => doomed.has(lead.id) && !isSampleLead(lead))
+      .map(({ id, name, phone, email, website, city, mapsUrl }): DeletedLead => ({ id, name, phone, email, website, city: city ?? '', mapsUrl: mapsUrl ?? '', deletedAt }));
+    if (gone.length) {
+      const again = new Set(gone.map((record) => record.id));
+      saveDeleted([...gone, ...readDeleted().filter((record) => !again.has(record.id))]);
+    }
     save(read().filter((item) => !doomed.has(item.id)));
     saveTimeline(readTimeline().filter((entry) => !doomed.has(entry.leadId)));
     saveCoaching(readCoaching().filter((report) => !doomed.has(report.leadId)));
@@ -265,6 +291,7 @@ export function createLocalRepository(): LeadRepository {
       taken.add(newLead.id);
     }
     save([...created, ...read()]);
+    undelete(created.map((lead) => lead.id));
     return { created: structuredClone(created), skippedIds };
   };
 
@@ -288,14 +315,15 @@ export function createLocalRepository(): LeadRepository {
       const lead = strip(newLead);
       save([lead, ...read().filter((item) => item.id !== lead.id)]);
       addEntries(notesToTimeline(lead, newLead.notes));
+      undelete([lead.id]);
       return lead;
     },
     createMany,
     async importJson(items, mapping = {}) {
       // The server's rules, against the leads in this browser
       // A lead saved here before cities existed has none (not an unknown one), so it can be filled in
-      const existing = read().map((lead) => ({ ...lead, city: lead.city ?? '', mapsUrl: lead.mapsUrl ?? '' }));
-      const plan = planJsonImport(items, existing, appConfig.defaultCountryCode, mapping);
+      const existing = known().map((lead) => ({ ...lead, city: lead.city ?? '', mapsUrl: lead.mapsUrl ?? '' }));
+      const plan = planJsonImport(items, existing, appConfig.defaultCountryCode, mapping, Intl.DateTimeFormat().resolvedOptions().timeZone);
       const rows = plan.leads.map(
         (draft): ParsedRow => ({
           key: String(draft.index),
@@ -351,6 +379,9 @@ export function createLocalRepository(): LeadRepository {
     },
     async removeMany(ids) {
       await forget(ids);
+    },
+    async deletedLeads() {
+      return structuredClone(readDeleted());
     },
     async daily() {
       const quota = appConfig.dailyQuota;
@@ -532,19 +563,21 @@ export function createLocalRepository(): LeadRepository {
     prospectScreenshot: () => null,
     async importProspects(ids) {
       const { search, prospects } = readDemo();
-      const byPhone = new Map(read().flatMap((lead) => (phoneDigits(lead.phone) ? [[phoneDigits(lead.phone), lead.id] as const] : [])));
+      // As the server does it: the same number, Maps place, site, or name in the searched area
+      const registry = new LeadRegistry(known(), appConfig.defaultCountryCode);
       const result: ProspectImport = { created: [], skipped: [] };
       const planned: { prospectId: string; lead: NewLead }[] = [];
       for (const id of new Set(ids)) {
         const prospect = prospects.find((item) => item.id === id);
-        const digits = prospect ? phoneDigits(prospect.phone) : '';
+        const found = prospect ? registry.find({ ...prospect, city: search.location }) : null;
         if (!prospect) result.skipped.push({ id, reason: 'missing' });
         else if (!canImport(prospect)) result.skipped.push({ id, reason: 'imported', leadId: prospect.importedLeadId ?? undefined });
-        else if (digits && byPhone.has(digits)) result.skipped.push({ id, reason: 'exists', leadId: byPhone.get(digits) });
+        else if (found?.deleted) result.skipped.push({ id, reason: 'deleted' });
+        else if (found) result.skipped.push({ id, reason: 'exists', leadId: found.lead.id });
         else {
           const lead = leadFromProspect(prospect, search);
           planned.push({ prospectId: id, lead });
-          if (digits) byPhone.set(digits, lead.id);
+          registry.add(lead);
         }
       }
       if (planned.length) {

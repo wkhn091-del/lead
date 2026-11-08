@@ -39,11 +39,12 @@ const REPORT_LIMIT = 200;
 
 const REASONS: Record<JsonSkipReason, { chip: string; tone: string; summary: (n: number) => string }> = {
   exists: { chip: 'כבר ב-CRM', tone: 'var(--st-no-answer)', summary: (n) => (n === 1 ? 'ליד אחד כבר שמור ב-CRM' : `${n} כבר שמורים ב-CRM`) },
-  repeated: { chip: 'כפול ברשימה', tone: 'var(--st-no-answer)', summary: (n) => (n === 1 ? 'מספר אחד חוזר ברשימה' : `${n} מספרים חוזרים ברשימה`) },
+  deleted: { chip: 'נמחק בעבר', tone: 'var(--st-lost)', summary: (n) => (n === 1 ? 'עסק אחד כבר היה ב-CRM ונמחק' : `${n} כבר היו ב-CRM ונמחקו`) },
+  repeated: { chip: 'כפול ברשימה', tone: 'var(--st-no-answer)', summary: (n) => (n === 1 ? 'עסק אחד חוזר ברשימה' : `${n} עסקים חוזרים ברשימה`) },
   'no-phone': { chip: 'בלי טלפון', tone: 'var(--danger)', summary: (n) => (n === 1 ? 'ליד אחד בלי טלפון תקין' : `${n} בלי טלפון תקין`) },
   invalid: { chip: 'לא תקין', tone: 'var(--danger)', summary: (n) => (n === 1 ? 'פריט אחד לא תקין' : `${n} פריטים לא תקינים`) },
 };
-const REASON_ORDER: JsonSkipReason[] = ['exists', 'repeated', 'no-phone', 'invalid'];
+const REASON_ORDER: JsonSkipReason[] = ['exists', 'deleted', 'repeated', 'no-phone', 'invalid'];
 
 /** Field names inside a Hebrew sentence, kept left to right as one run */
 const fieldList = (fields: readonly string[]) => `⁦${fields.join(', ')}⁩`;
@@ -159,7 +160,7 @@ export function JsonImportStep({ text, onChange, switcher, onLockChange, onClose
     <div className="flex min-h-0 flex-1 flex-col">
       <DialogHeading
         title="ייבוא לידים"
-        description="מדביקים JSON של לידים או פותחים קובץ, למשל מדפי זהב או מגוגל מפות. ליד נשמר רק אם מספר הטלפון שלו חדש: מספר שכבר יש ב-CRM, או שחוזר ברשימה, מדולג."
+        description="מדביקים JSON של לידים או פותחים קובץ, למשל מדפי זהב או מגוגל מפות. נשמרים רק עסקים חדשים: עסק שכבר ב-CRM, שהיה בו ונמחק, או שחוזר ברשימה (אותו טלפון, אותו מקום בגוגל מפות, אותו אתר, או אותו שם באותה עיר) מדולג."
         closable={!busy}
       />
       <DialogBody className="flex flex-col gap-3">
@@ -392,7 +393,7 @@ function Report({ outcome, onAgain, onDone }: { outcome: JsonImportOutcome; onAg
     ({ n }) => n > 0,
   );
   const description = [
-    updated > 0 && 'לידים שכבר היו קיבלו את מה שחסר להם: עיר, קישור לגוגל מפות או אתר. שום פרט קיים לא שונה.',
+    updated > 0 && 'לידים שכבר היו קיבלו את מה שחסר להם: טלפון, עיר, קישור לגוגל מפות או אתר. שום פרט קיים לא שונה.',
     skipped === 0
       ? updated === 0 && 'כל הלידים נוספו.'
       : skipped === 1
