@@ -8,7 +8,7 @@ import { BOARD_COLUMNS, type BoardColumn } from '../../lib/board';
 import { cn } from '../../lib/cn';
 import { exportLeads } from '../../lib/export';
 import { count, NOUNS } from '../../lib/hebrew';
-import { campaignCounts } from '../../lib/leads';
+import { campaignCounts, cityCounts } from '../../lib/leads';
 import { ADDED_OPTIONS, byLatestTouch, filterLeadsBy, statusCounts, statusRank, type AddedFilter } from '../../lib/leads-table';
 import { ARCHIVED_META, PIPELINE, STATUS_META, type ToneMeta } from '../../lib/stages';
 import { useLeadStore } from '../../store/leads';
@@ -56,12 +56,14 @@ export function LeadsView() {
     useShallow((s) => ({
       query: s.query,
       campaign: s.campaignFilter,
+      city: s.cityFilter,
       statuses: s.statusFilter,
       added: s.addedFilter,
       layout: s.leadsLayout,
       showArchived: s.showArchived,
       setQuery: s.setQuery,
       setCampaign: s.setCampaignFilter,
+      setCity: s.setCityFilter,
       toggleStatus: s.toggleStatus,
       setStatuses: s.setStatusFilter,
       setAdded: s.setAddedFilter,
@@ -75,18 +77,22 @@ export function LeadsView() {
   const wide = useMediaQuery('(min-width: 1024px)');
   const search = useDeferredValue(ui.query);
   const campaigns = useMemo(() => campaignCounts(leads), [leads]);
+  const cities = useMemo(() => cityCounts(leads), [leads]);
 
   // The table: the statuses chosen (none: all but "not relevant"); the board: every status, in its columns
   const tableRows = useMemo(
-    () => filterLeadsBy(leads, { query: search, campaign: ui.campaign, statuses: ui.statuses, added: ui.added }).sort(byLatestTouch),
-    [leads, search, ui.campaign, ui.statuses, ui.added],
+    () => filterLeadsBy(leads, { query: search, campaign: ui.campaign, city: ui.city, statuses: ui.statuses, added: ui.added }).sort(byLatestTouch),
+    [leads, search, ui.campaign, ui.city, ui.statuses, ui.added],
   );
   const boardRows = useMemo(
-    () => filterLeadsBy(leads, { query: search, campaign: ui.campaign, statuses: BOARD_COLUMNS, added: ui.added }),
-    [leads, search, ui.campaign, ui.added],
+    () => filterLeadsBy(leads, { query: search, campaign: ui.campaign, city: ui.city, statuses: BOARD_COLUMNS, added: ui.added }),
+    [leads, search, ui.campaign, ui.city, ui.added],
   );
-  const counts = useMemo(() => statusCounts(leads, { query: search, campaign: ui.campaign, added: ui.added }), [leads, search, ui.campaign, ui.added]);
-  const filterKey = `${search}|${ui.campaign}|${ui.statuses.join()}|${ui.added}`;
+  const counts = useMemo(
+    () => statusCounts(leads, { query: search, campaign: ui.campaign, city: ui.city, added: ui.added }),
+    [leads, search, ui.campaign, ui.city, ui.added],
+  );
+  const filterKey = `${search}|${ui.campaign}|${ui.city}|${ui.statuses.join()}|${ui.added}`;
   const table = useLeadsTable(tableRows, filterKey);
 
   if (loadState === 'idle' || (loadState === 'loading' && leads.length === 0)) return <LoadingLeads layout={ui.layout} />;
@@ -139,7 +145,7 @@ export function LeadsView() {
   const shown: readonly Lead[] = isTable
     ? table.getPrePaginationRowModel().rows.map((row) => row.original)
     : boardRows.filter((lead) => ui.showArchived || !lead.archivedAt).sort((a, b) => statusRank(a) - statusRank(b) || byLatestTouch(a, b));
-  const filtering = Boolean(search.trim() || ui.campaign || ui.added !== 'all' || (isTable && ui.statuses.length));
+  const filtering = Boolean(search.trim() || ui.campaign || ui.city || ui.added !== 'all' || (isTable && ui.statuses.length));
   const nothingFound = isTable ? tableRows.length === 0 : boardRows.length === 0;
 
   return (
@@ -175,6 +181,16 @@ export function LeadsView() {
             {campaigns.map((campaign) => (
               <option key={campaign.name} value={campaign.name}>
                 {campaign.name} ({campaign.count})
+              </option>
+            ))}
+          </Select>
+        )}
+        {cities.length > 0 && (
+          <Select aria-label="עיר" value={ui.city} onChange={(event) => ui.setCity(event.target.value)} className="w-40 max-sm:min-w-0 max-sm:flex-1 max-sm:basis-[40%]">
+            <option value="">כל הערים</option>
+            {cities.map((city) => (
+              <option key={city.name} value={city.name}>
+                {city.name} ({city.count})
               </option>
             ))}
           </Select>
@@ -287,7 +303,8 @@ function ExportButtons({ rows }: { rows: readonly Lead[] }) {
   const none = rows.length === 0;
   const run = (format: 'xlsx' | 'csv') => exportRows(rows, format);
   return (
-    <div className="flex items-center gap-1 max-sm:min-w-0 max-sm:flex-1 sm:ms-auto">
+    // On a phone it takes the rest of its row, or a row of its own when the filters leave too little
+    <div className="flex items-center gap-1 max-sm:min-w-0 max-sm:flex-1 max-sm:basis-[40%] sm:ms-auto">
       <Button
         variant="primary"
         className="max-sm:flex-1"

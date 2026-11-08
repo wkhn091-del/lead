@@ -38,7 +38,7 @@ describe('reading pasted JSON', () => {
     const plan = planJsonImport(SAMPLE, [], '972');
     expect(plan.skipped).toEqual([]);
     expect(plan.ignoredFields).toEqual([]);
-    const blank = { contactName: '', email: '', website: '' };
+    const blank = { contactName: '', email: '', website: '', city: '', mapsUrl: '' };
     expect(plan.leads).toEqual([
       { index: 0, name: 'יוסי שיפוצים', phone: '054-123-4567', campaign: 'קבלני שיפוצים', note: 'יובא מקובץ JSON\nמקור: קמפיין פייסבוק\nביקש לחזור אליו אחרי החגים', ...blank },
       { index: 1, name: 'מוסך הגליל', phone: '052-987-6543', campaign: 'מוסכים', note: 'יובא מקובץ JSON\nמקור: חיפוש גוגל', ...blank },
@@ -100,6 +100,9 @@ describe('reading pasted JSON', () => {
         phone: '050-909-4047',
         email: '',
         website: '',
+        // The city and the Maps listing go on the lead; the note keeps them with the rest
+        city: 'ירושלים',
+        mapsUrl: 'https://www.google.com/maps/search/?api=1&query_place_id=ChIJ_WdbXrzXAhURVLgwOQFqrDY',
         campaign: 'מספרה',
         note: [
           'יובא מקובץ JSON',
@@ -115,6 +118,9 @@ describe('reading pasted JSON', () => {
         phone: '09-765-4321',
         email: '',
         website: '',
+        // From inside the address; a Yellow Pages link isn't a Maps listing
+        city: 'רעננה',
+        mapsUrl: '',
         campaign: 'חנויות פרחים',
         note: 'יובא מקובץ JSON\nכתובת: הרצל 5, רעננה\nטלפון נוסף: 050-123-4567\nדפי זהב: https://www.d.co.il/80123456/',
       },
@@ -205,7 +211,7 @@ describe('reading pasted JSON', () => {
     expect(plan.skipped[4].message).toBe('אין מספר טלפון (phone, mobile או tel).');
     expect(plan.skipped[6].message).toBe('השדה name צריך להכיל טקסט.');
     expect(plan.leads).toEqual([
-      { index: 7, name: 'אותיות גדולות', contactName: '', phone: '054-333-3333', email: 'a@b.example', website: '', campaign: '', note: 'יובא מקובץ JSON\nכתובת: חיפה' },
+      { index: 7, name: 'אותיות גדולות', contactName: '', phone: '054-333-3333', email: 'a@b.example', website: '', city: 'חיפה', mapsUrl: '', campaign: '', note: 'יובא מקובץ JSON\nכתובת: חיפה' },
       {
         index: 8,
         name: 'שדות בעברית',
@@ -213,11 +219,125 @@ describe('reading pasted JSON', () => {
         phone: '054-444-4444',
         email: '',
         website: '',
+        city: '',
+        mapsUrl: '',
         campaign: 'מסגריות',
         note: 'יובא מקובץ JSON\nמקור: המלצה\nשורה אחת\nשורה שתיים',
       },
     ]);
     expect(plan.ignoredFields).toEqual(['name', 'fax']);
+  });
+
+  it('fills in the city, Maps link and website a lead already here is missing, and changes nothing it has', () => {
+    const maps = 'https://www.google.com/maps/search/?api=1&query_place_id=ChIJabc';
+    const existing = [
+      { id: 'old', name: 'מספרת קובי', phone: '050-111-2233', city: '', mapsUrl: '', website: '' },
+      { id: 'full', name: 'נגריית הכרמל', phone: '04-812-3456', city: 'חיפה', mapsUrl: maps, website: 'carmel.example' },
+      // An app that doesn't say what a lead has: nothing is filled in on a guess
+      { id: 'unknown', name: 'מסגרייה', phone: '054-999-8877' },
+    ];
+    const plan = planJsonImport(
+      [
+        { title: 'מספרת קובי', phone: '+972 50-111-2233', city: 'ירושלים', url: maps, website: 'kobi.example' },
+        { title: 'מספרת קובי שוב', phone: '0501112233', city: 'תל אביב' },
+        { title: 'נגריית הכרמל', phone: '04-8123456', city: 'עכו', url: 'https://www.google.com/maps/place/other' },
+        { title: 'מסגרייה', phone: '054-9998877', city: 'באר שבע' },
+      ],
+      existing,
+      '972',
+    );
+    expect(plan.leads).toEqual([]);
+    expect(plan.fills).toEqual([{ index: 0, id: 'old', name: 'מספרת קובי', details: { city: 'ירושלים', mapsUrl: maps, website: 'kobi.example' } }]);
+    expect(plan.skipped.map(({ index, reason, leadId }) => [index, reason, leadId])).toEqual([
+      [1, 'exists', 'old'],
+      [2, 'exists', 'full'],
+      [3, 'exists', 'unknown'],
+    ]);
+    // The list given isn't changed
+    expect(existing[0].city).toBe('');
+  });
+
+  it('knows a business by its Maps place, its site, or its name in the city, not only by its number', () => {
+    const listing = 'https://www.google.com/maps/search/?api=1&query=x&query_place_id=ChIJplace';
+    const branch = 'https://www.google.com/maps/search/?api=1&query=y&query_place_id=ChIJbranch';
+    const existing = [
+      { id: 'placed', name: 'THE MODERN MAN', phone: '052-521-0652', city: 'טבריה', mapsUrl: listing, website: '' },
+      { id: 'insta', name: 'מספרת אבי', phone: '050-111-1111', city: 'חיפה', mapsUrl: '', website: 'https://instagram.com/avi_barber' },
+      { id: 'named', name: 'Barber Shop', phone: '', city: 'ירושלים', mapsUrl: '', website: '' },
+    ];
+    const plan = planJsonImport(
+      [
+        // The same place on Maps, under another number
+        { title: 'The Modern Man - Barberia', phone: '04-670-0000', url: listing },
+        // The same Instagram page
+        { title: 'Avi', phone: '053-222-2222', website: 'https://www.instagram.com/Avi_Barber/' },
+        // The same name in the same city, and the lead has no number: it gets this one
+        { title: 'BARBER SHOP', phone: '054-333-3333', city: 'ירושלים' },
+        // Another city, then another branch there (another number): both new
+        { title: 'Barber Shop', phone: '054-444-4444', city: 'תל אביב' },
+        { title: 'Barber Shop', phone: '054-555-5555', city: 'תל אביב' },
+        // The same place twice in the list
+        { title: 'Barber Shop TLV', phone: '054-666-6666', url: branch },
+        { title: 'Barber Shop TLV (2)', phone: '054-777-7777', url: branch },
+      ],
+      existing,
+      '972',
+    );
+    expect(plan.leads.map((lead) => lead.index)).toEqual([3, 4, 5]);
+    expect(plan.fills).toEqual([{ index: 2, id: 'named', name: 'Barber Shop', details: { phone: '054-333-3333' } }]);
+    expect(plan.skipped).toMatchObject([
+      { index: 0, reason: 'exists', leadId: 'placed', matchedBy: 'place', message: 'המקום הזה בגוגל מפות כבר שמור בליד ״THE MODERN MAN״.' },
+      { index: 1, reason: 'exists', leadId: 'insta', matchedBy: 'site', message: 'האתר הזה כבר שמור בליד ״מספרת אבי״.' },
+      { index: 6, reason: 'repeated', firstIndex: 5, matchedBy: 'place', message: 'המקום הזה בגוגל מפות כבר מופיע קודם ברשימה.' },
+    ]);
+  });
+
+  it('skips a business that was deleted, and says when and why', () => {
+    const plan = planJsonImport(
+      [
+        { title: 'THE MODERN MAN', phone: '0525210652' },
+        { title: 'Barber Shop', phone: '054-333-3333', city: 'ירושלים' },
+        { title: 'חדשה', phone: '053-123-4567' },
+      ],
+      [
+        { id: 'gone', name: 'THE MODERN MAN - barberia', phone: '052-521-0652', deletedAt: new Date('2026-11-06T23:30:00Z') },
+        { id: 'gone2', name: 'barber-shop', phone: '', city: 'ירושלים', deletedAt: '2026-10-01T09:00:00.000Z' },
+        // Archived (not relevant) is still in the CRM
+        { id: 'here', name: 'חנות', phone: '053-123-4567', archivedAt: new Date('2026-10-01T09:00:00Z') },
+      ],
+      '972',
+    );
+    expect(plan.leads).toEqual([]);
+    expect(plan.skipped).toEqual([
+      {
+        index: 0,
+        name: 'THE MODERN MAN',
+        phone: '0525210652',
+        reason: 'deleted',
+        matchedBy: 'phone',
+        deletedAt: '2026-11-06T23:30:00.000Z',
+        // Israel's date, not UTC's
+        message: 'העסק הזה כבר היה ב-CRM בתור ״THE MODERN MAN - barberia״ ונמחק ב-7.11.2026 (אותו מספר טלפון).',
+      },
+      {
+        index: 1,
+        name: 'Barber Shop',
+        phone: '054-333-3333',
+        reason: 'deleted',
+        matchedBy: 'name',
+        deletedAt: '2026-10-01T09:00:00.000Z',
+        message: 'העסק הזה כבר היה ב-CRM בתור ״barber-shop״ ונמחק ב-1.10.2026 (אותו שם ועיר).',
+      },
+      {
+        index: 2,
+        name: 'חדשה',
+        phone: '053-123-4567',
+        reason: 'exists',
+        leadId: 'here',
+        matchedBy: 'phone',
+        message: 'המספר כבר שמור בליד ״חנות״ (מסומן כלא רלוונטי).',
+      },
+    ]);
   });
 
   it('reads keys by what is in them, after every exact name', () => {
@@ -270,7 +390,7 @@ describe('reading pasted JSON', () => {
       '972',
     );
     expect(plan.leads).toEqual([
-      { index: 0, name: 'מסגרייה', contactName: '', phone: '054-999-8877', email: '', website: '', campaign: '', note: 'יובא מקובץ JSON\nטלפון נוסף: 052-111-2233' },
+      { index: 0, name: 'מסגרייה', contactName: '', phone: '054-999-8877', email: '', website: '', city: '', mapsUrl: '', campaign: '', note: 'יובא מקובץ JSON\nטלפון נוסף: 052-111-2233' },
     ]);
     expect(plan.skipped).toMatchObject([{ index: 1, reason: 'no-phone' }]);
     expect(plan.ignoredFields).toEqual(['fax', 'code', 'date']);
@@ -392,6 +512,67 @@ describe('POST /api/leads/import-json', () => {
       .expect(201);
     expect(response.body.created).toMatchObject([{ name: 'שיפוצי יוסי', contactName: '', phone: '054-123-4567', campaign: 'שיפוצים', stage: 'cold_call', activity: [] }]);
     await api.post(`/api/leads/import-json?name=${'x'.repeat(201)}`).send([{ name: 'א', phone: '054-7654321' }]).expect(400);
+  });
+
+  it('completes the leads an earlier import made, when the list is imported again', async () => {
+    const { api } = setup();
+    const maps = 'https://www.google.com/maps/search/?api=1&query_place_id=ChIJxyz';
+    await api.post('/api/leads/import-json').send([{ name: 'מספרת קובי', phone: '050-1112233' }]).expect(201);
+    const again = await api
+      .post('/api/leads/import-json')
+      .send([{ title: 'מספרת קובי', phone: '+972 50-111-2233', city: 'ירושלים', url: maps }, { title: 'חדשה', phone: '052-7654321', city: 'טבריה' }])
+      .expect(201);
+    expect(again.body.created).toMatchObject([{ name: 'חדשה', city: 'טבריה', mapsUrl: '' }]);
+    expect(again.body.updated).toMatchObject([{ name: 'מספרת קובי', city: 'ירושלים', mapsUrl: maps, stage: 'cold_call' }]);
+    expect(again.body.skipped).toEqual([]);
+    const leads = (await api.get('/api/leads').expect(200)).body as { name: string; city: string }[];
+    expect(leads.map(({ name, city }) => [name, city]).sort()).toEqual([
+      ['חדשה', 'טבריה'],
+      ['מספרת קובי', 'ירושלים'],
+    ]);
+    // And a city or Maps link can be set by hand, a link only if it's http(s)
+    const [kobi] = again.body.updated as { id: string }[];
+    await api.patch(`/api/leads/${kobi.id}`).send({ city: 'בית שמש' }).expect(200);
+    await api.patch(`/api/leads/${kobi.id}`).send({ mapsUrl: 'javascript:alert(1)' }).expect(400);
+  });
+
+  it('remembers deleted leads: an import skips them, and a deletion that is undone is forgotten', async () => {
+    const { api } = setup();
+    const first = await api
+      .post('/api/leads/import-json')
+      .send([
+        { title: 'THE MODERN MAN', phone: '052-521-0652', city: 'טבריה' },
+        { title: 'מספרת קובי', phone: '050-1112233' },
+      ])
+      .expect(201);
+    const created = first.body.created as { id: string; name: string; phone: string }[];
+    const modern = created.find((lead) => lead.name === 'THE MODERN MAN')!;
+    const kobi = created.find((lead) => lead.name === 'מספרת קובי')!;
+    await api.delete(`/api/leads/${modern.id}`).expect(204);
+    await api.post('/api/leads/bulk-delete').send({ ids: [kobi.id] }).expect(204);
+
+    const deleted = (await api.get('/api/leads/deleted').expect(200)).body;
+    expect(deleted).toHaveLength(2);
+    expect(deleted).toContainEqual(expect.objectContaining({ id: modern.id, name: 'THE MODERN MAN', phone: '052-521-0652', city: 'טבריה', deletedAt: '2026-11-01T08:00:00.000Z' }));
+
+    const again = await api
+      .post('/api/leads/import-json')
+      .send([
+        { title: 'The Modern Man', phone: '+972 52-521-0652' },
+        { title: 'מספרת קובי', phone: '0501112233' },
+      ])
+      .expect(201);
+    expect(again.body.created).toEqual([]);
+    expect(again.body.skipped).toMatchObject([
+      { index: 0, reason: 'deleted', matchedBy: 'phone', message: 'העסק הזה כבר היה ב-CRM בתור ״THE MODERN MAN״ ונמחק ב-1.11.2026 (אותו מספר טלפון).' },
+      { index: 1, reason: 'deleted', matchedBy: 'phone' },
+    ]);
+
+    // Undoing a deletion saves the lead again under its id: it's not a deleted one anymore
+    await api.post('/api/leads').send({ id: modern.id, name: 'THE MODERN MAN', phone: '052-521-0652', method: 'call' }).expect(201);
+    expect((await api.get('/api/leads/deleted').expect(200)).body.map((item: { id: string }) => item.id)).toEqual([kobi.id]);
+    const third = await api.post('/api/leads/import-json').send([{ title: 'The Modern Man', phone: '0525210652' }]).expect(201);
+    expect(third.body.skipped).toMatchObject([{ reason: 'exists', leadId: modern.id }]);
   });
 
   it('takes only a JSON array of leads, within the limit', async () => {

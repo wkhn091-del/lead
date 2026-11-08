@@ -163,6 +163,9 @@ export function leadFromProspect(prospect: Prospect, search: ProspectSearch, now
     phone: prospect.phone,
     email: prospect.analysis.signals?.emails[0] ?? '',
     website: prospect.website,
+    // The area searched: where these businesses are (as the server's importer does it)
+    city: search.location.trim().slice(0, 60),
+    mapsUrl: /^https?:\/\/\S+$/i.test(prospect.mapsUrl) && prospect.mapsUrl.length <= 500 ? prospect.mapsUrl : '',
     campaign: campaignFor(search),
     approach: approachFor(prospect),
     method: 'call',

@@ -174,6 +174,23 @@ describe('review and build', () => {
     expect(unnamed.map((row) => row.issue)).toEqual(['missing-name', null]);
   });
 
+  it('flags a business that was in the CRM and was deleted, and still knows the ones that are there', () => {
+    const rows = reviewRows(
+      parseImport('Tamar Pottery - 050-000-0998\nRotem Flowers - 050-000-0997\nGil Bakery - 050-000-0996').rows,
+      [{ ...existing[0], id: 'gil', name: 'Gil Bakery', phone: '050-000-0996' }],
+      [
+        { id: 'x', name: 'Tamar Ceramics', phone: '+972 50-000-0998', email: '', website: '', city: '', mapsUrl: '', deletedAt: '2026-11-01T08:00:00.000Z' },
+        { id: 'y', name: 'Gil Bakery', phone: '050-000-0996', email: '', website: '', city: '', mapsUrl: '', deletedAt: '2026-10-01T08:00:00.000Z' },
+      ],
+    );
+    expect(rows.map((row) => [row.name, row.issue, row.match, row.deletedAt ?? null])).toEqual([
+      ['Tamar Pottery', 'deleted', 'Tamar Ceramics', '2026-11-01T08:00:00.000Z'],
+      ['Rotem Flowers', null, null, null],
+      // Deleted once and added again: it's the lead that's there now
+      ['Gil Bakery', 'in-crm', 'Gil Bakery', null],
+    ]);
+  });
+
   it('builds Cold Call leads in paste order, tagged with the batch campaign', () => {
     const rows = parseImport('Tamar Pottery - 050-000-0998\nRotem Flowers - 050-000-0997').rows;
     const leads = buildLeads(rows, { campaign: 'Gift shops', method: 'whatsapp', currency: 'ILS' }, Date.parse('2026-10-21T12:00:00Z'));

@@ -142,8 +142,20 @@ export function filterLeads(leads: readonly Lead[], { query, stage, campaign, so
 
 /** Campaign names with their lead counts, most leads first */
 export function campaignCounts(leads: readonly Lead[]): { name: string; count: number }[] {
+  return countsOf(leads, (lead) => lead.campaign);
+}
+
+/** Each city the leads are in, with how many, the most common first */
+export function cityCounts(leads: readonly Lead[]): { name: string; count: number }[] {
+  return countsOf(leads, (lead) => lead.city ?? '');
+}
+
+function countsOf(leads: readonly Lead[], valueOf: (lead: Lead) => string): { name: string; count: number }[] {
   const counts = new Map<string, number>();
-  for (const lead of leads) if (lead.campaign) counts.set(lead.campaign, (counts.get(lead.campaign) ?? 0) + 1);
+  for (const lead of leads) {
+    const value = valueOf(lead);
+    if (value) counts.set(value, (counts.get(value) ?? 0) + 1);
+  }
   return [...counts]
     .map(([name, count]) => ({ name, count }))
     .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, 'he'));

@@ -17,6 +17,7 @@ import type { ActionType, Lead } from '../types';
 import { logWhatsApp, useWhatsAppLink } from './pipeline/actions';
 import { CoachPanel } from './profile/CoachPanel';
 import { DetailsPanel } from './profile/DetailsPanel';
+import { LeadLinks } from './profile/LeadLinks';
 import { TimelinePanel } from './profile/TimelinePanel';
 import { StageStepper } from './StageStepper';
 import { Button, buttonStyles } from './ui/Button';
@@ -98,6 +99,7 @@ export function LeadDetails({ lead, onDeleted }: LeadDetailsProps) {
 
   return (
     <div className="flex flex-col gap-5 px-4 pt-2 pb-5 sm:px-5">
+      <LeadLinks lead={lead} />
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <StageStepper lead={lead} />
         <div className="flex flex-wrap gap-2">

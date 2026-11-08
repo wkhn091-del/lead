@@ -169,16 +169,18 @@ export function createProspectorRouter(
   });
 
   /**
-   * Adds the chosen businesses as leads, at Cold Call, so they join the Daily 10 pool. A business whose phone
-   * or website is already on a lead is skipped, and so is one imported before.
+   * Adds the chosen businesses as leads, at Cold Call, so they join the Daily 10 pool. A business that's already a
+   * lead (the same number, Maps place, website, or name in the area) is skipped, and so is one imported before, and
+   * one that was a lead and was deleted.
    */
   router.post('/import', async (req, res) => {
     const { ids } = ImportInput.parse(req.body ?? {});
     const prospects = await store.getProspects([...new Set(ids)]);
-    const matcher = new LeadMatcher(await stores.leads.list(), countryCode);
+    const [leads, deleted] = await Promise.all([stores.leads.identities(), stores.deletedLeads.list()]);
+    const matcher = new LeadMatcher([...leads, ...deleted], countryCode);
     const searches = new Map<string, ProspectSearchRecord | null>();
     const now = clock();
-    const skipped: { id: string; reason: 'imported' | 'exists' | 'missing'; leadId?: string }[] = [];
+    const skipped: { id: string; reason: 'imported' | 'exists' | 'deleted' | 'missing'; leadId?: string }[] = [];
     const planned: { prospect: ProspectRecord; lead: ReturnType<typeof leadFor> }[] = [];
 
     for (const id of new Set(ids)) {
@@ -191,22 +193,26 @@ export function createProspectorRouter(
         skipped.push({ id, reason: 'imported', leadId: prospect.importedLeadId });
         continue;
       }
-      const existing = matcher.find(prospect);
-      if (existing) {
-        await store.setExistingLead(id, existing);
-        skipped.push({ id, reason: 'exists', leadId: existing });
-        continue;
-      }
       if (!searches.has(prospect.searchId)) searches.set(prospect.searchId, await store.getSearch(prospect.searchId));
       const search = searches.get(prospect.searchId);
       if (!search) {
         skipped.push({ id, reason: 'missing' });
         continue;
       }
+      const found = matcher.check(prospect, search.location);
+      if (found?.deleted) {
+        skipped.push({ id, reason: 'deleted' });
+        continue;
+      }
+      if (found) {
+        await store.setExistingLead(id, found.lead.id);
+        skipped.push({ id, reason: 'exists', leadId: found.lead.id });
+        continue;
+      }
       const lead = leadFor(prospect, search, now);
       planned.push({ prospect, lead });
       // Two branches with one number in the same import become one lead
-      matcher.add({ id: lead.id, phone: lead.phone, website: lead.website });
+      matcher.add({ id: lead.id, name: lead.name, phone: lead.phone, website: lead.website, city: lead.city, mapsUrl: lead.mapsUrl });
     }
 
     let created: LeadRecord[] = [];

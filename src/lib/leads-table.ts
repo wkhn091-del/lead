@@ -22,6 +22,8 @@ export interface LeadFilter {
   query: string;
   /** Empty for every niche */
   campaign: string;
+  /** Empty for every city */
+  city: string;
   /** Empty: every status but "not relevant", which shows only when asked for */
   statuses: readonly BoardColumn[];
   added: AddedFilter;
@@ -54,6 +56,7 @@ export function filterLeadsBy(leads: readonly Lead[], filter: LeadFilter, now = 
     const column = boardColumn(lead);
     if (statuses.size ? !statuses.has(column) : column === 'archived') return false;
     if (filter.campaign && lead.campaign !== filter.campaign) return false;
+    if (filter.city && (lead.city ?? '') !== filter.city) return false;
     if (since !== null && Date.parse(lead.createdAt) < since) return false;
     return matchesSearch(lead, filter.query);
   });
@@ -100,6 +103,7 @@ export const EXPORT_COLUMNS: readonly ExportColumn[] = [
   { header: 'טלפון', width: 15, kind: 'text', value: (lead) => (lead.phone ? formatPhone(lead.phone) : '') },
   { header: 'אימייל', width: 26, kind: 'text', value: (lead) => lead.email },
   { header: 'אתר', width: 26, kind: 'text', value: (lead) => lead.website },
+  { header: 'עיר', width: 14, kind: 'text', value: (lead) => lead.city ?? '' },
   { header: 'נישה', width: 16, kind: 'text', value: (lead) => lead.campaign },
   { header: 'סטטוס', width: 17, kind: 'text', value: statusLabel },
   { header: 'שיחות', width: 8, kind: 'number', value: callCount },
@@ -111,6 +115,7 @@ export const EXPORT_COLUMNS: readonly ExportColumn[] = [
   { header: 'חידוש שנתי', width: 12, kind: 'money', value: (lead) => (lead.stage === 'closed' ? lead.deal.hostingYearly : null) },
   { header: 'מטבע', width: 7, kind: 'text', value: (lead) => (lead.stage === 'closed' ? lead.currency : '') },
   { header: 'איך לדבר איתם', width: 40, kind: 'text', value: (lead) => lead.approach },
+  { header: 'גוגל מפות', width: 30, kind: 'text', value: (lead) => lead.mapsUrl ?? '' },
 ];
 
 /** The leads sorted the way the table shows them: the most recently touched first, before any column sort */

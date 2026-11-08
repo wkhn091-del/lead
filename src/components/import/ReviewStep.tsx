@@ -2,6 +2,7 @@ import { ArrowLeft, Globe, LoaderCircle, Mail, RotateCcw, UserRound } from 'luci
 import { useMemo, useRef, useState, type ReactNode } from 'react';
 import { appConfig } from '../../config';
 import { cn } from '../../lib/cn';
+import { formatDate } from '../../lib/format';
 import { count, NOUNS } from '../../lib/hebrew';
 import { COLUMN_TARGETS, TARGET_LABELS, type ColumnTarget } from '../../lib/import/fields';
 import { parseImport, rowsFromTable, type ImportColumn } from '../../lib/import/parse';
@@ -41,6 +42,7 @@ export function ReviewStep({ text, onBack, onLockChange, onClose }: ReviewStepPr
   const parsed = useMemo(() => parseImport(text), [text]);
   // Compare against the leads as they were when the review opened, so rows don't change while saving.
   const [existing] = useState(() => useLeadStore.getState().leads);
+  const [deleted] = useState(() => useLeadStore.getState().deleted);
   const importLeads = useLeadStore((s) => s.importLeads);
 
   const [targets, setTargets] = useState<ColumnTarget[]>(() => parsed.table?.columns.map((c) => c.detected) ?? []);
@@ -54,8 +56,8 @@ export function ReviewStep({ text, onBack, onLockChange, onClose }: ReviewStepPr
   const rows = useMemo(() => (parsed.table ? rowsFromTable(parsed.table, targets) : parsed.rows), [parsed, targets]);
   const unnamedKeys = useMemo(() => new Set(rows.filter((row) => !row.name.trim()).map((row) => row.key)), [rows]);
   const reviewed = useMemo(
-    () => reviewRows(rows.map((row) => (row.key in names ? { ...row, name: names[row.key] } : row)), existing),
-    [rows, names, existing],
+    () => reviewRows(rows.map((row) => (row.key in names ? { ...row, name: names[row.key] } : row)), existing, deleted),
+    [rows, names, existing, deleted],
   );
 
   const isChosen = (row: ReviewedRow) => row.name.trim() !== '' && (choices[row.key] ?? row.issue === null);
@@ -63,6 +65,7 @@ export function ReviewStep({ text, onBack, onLockChange, onClose }: ReviewStepPr
   const nameable = reviewed.filter((row) => row.name.trim() !== '');
   const allChosen = nameable.length > 0 && chosen.length === nameable.length;
   const inCrm = reviewed.filter((row) => row.issue === 'in-crm').length;
+  const wasDeleted = reviewed.filter((row) => row.issue === 'deleted').length;
   const repeated = reviewed.filter((row) => row.issue === 'repeated').length;
   const unnamed = reviewed.filter((row) => row.issue === 'missing-name').length;
   const busy = phase.kind === 'saving';
@@ -162,12 +165,15 @@ export function ReviewStep({ text, onBack, onLockChange, onClose }: ReviewStepPr
             </label>
             <div className="flex flex-wrap gap-1.5">
               {inCrm > 0 && <IssueChip tone="var(--st-no-answer)">{inCrm} כבר אצלך בלידים</IssueChip>}
+              {wasDeleted > 0 && <IssueChip tone="var(--st-lost)">{wasDeleted} היו בלידים ונמחקו</IssueChip>}
               {repeated > 0 && <IssueChip tone="var(--st-no-answer)">{repeated} מופיעים פעמיים בהדבקה</IssueChip>}
               {unnamed > 0 && <IssueChip tone="var(--danger)">{unnamed} בלי שם</IssueChip>}
             </div>
           </div>
-          {inCrm + repeated > 0 && (
-            <p className="mt-1.5 text-[12.5px] text-fg-faint">כפילויות לא מיובאות. אפשר לסמן אחת כדי לייבא אותה בכל זאת.</p>
+          {inCrm + wasDeleted + repeated > 0 && (
+            <p className="mt-1.5 text-[12.5px] text-fg-faint">
+              כפילויות, ועסקים שכבר היו ונמחקו, לא מיובאים. אפשר לסמן אחד כדי לייבא אותו בכל זאת.
+            </p>
           )}
 
           {reviewed.length === 0 ? (
@@ -359,6 +365,12 @@ function ReviewItem({ row, chosen, needsName, campaign, method, disabled, onTogg
             {row.issue === 'in-crm' && (
               <IssueChip tone="var(--st-no-answer)">
                 {row.match && !sameName(row.match, row.name) ? `כבר אצלך בתור ${row.match}` : 'כבר אצלך בלידים'}
+              </IssueChip>
+            )}
+            {row.issue === 'deleted' && (
+              <IssueChip tone="var(--st-lost)">
+                {`נמחק ${row.deletedAt ? `ב-${formatDate(row.deletedAt)}` : 'בעבר'}`}
+                {row.match && !sameName(row.match, row.name) ? ` (בתור ${row.match})` : ''}
               </IssueChip>
             )}
             {row.issue === 'repeated' && <IssueChip tone="var(--st-no-answer)">כפול</IssueChip>}

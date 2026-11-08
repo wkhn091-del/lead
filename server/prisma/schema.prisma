@@ -160,6 +160,10 @@ model Lead {
   phone          String        @default("")
   email          String        @default("")
   website        String        @default("")
+  /// The city or town the business is in. Optional: leads stored before it existed have none (read as "").
+  city           String?
+  /// The business's Google Maps listing. Optional, like city.
+  mapsUrl        String?
   /// Topic or niche of the batch the lead came in with, e.g. "Dentists"
   campaign       String        @default("")
   /// How to talk to this lead
@@ -188,6 +192,22 @@ model Lead {
   @@index([campaign])
   @@index([createdAt])
   @@map("leads")
+}
+
+/// A lead that was deleted, kept as what identifies the business: so a new lead, an import or the Prospector can
+/// tell it was in the CRM before (server/src/leads/identity.ts). A lead that's restored is forgotten.
+model DeletedLead {
+  /// The deleted lead's id
+  id        String   @id @map("_id")
+  name      String
+  phone     String   @default("")
+  email     String   @default("")
+  website   String   @default("")
+  city      String   @default("")
+  mapsUrl   String   @default("")
+  deletedAt DateTime @default(now())
+
+  @@map("deleted_leads")
 }
 
 /// One event on a lead's timeline: a call, a Zoom meeting, a WhatsApp message, an email or a note.

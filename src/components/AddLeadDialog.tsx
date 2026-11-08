@@ -1,13 +1,15 @@
 import * as Dialog from '@radix-ui/react-dialog';
-import { Compass, Plus, Store, UserRound } from 'lucide-react';
-import { useState, type FormEvent } from 'react';
+import { CopyCheck, Compass, Plus, Store, UserRound } from 'lucide-react';
+import { useMemo, useRef, useState, type FormEvent, type Ref } from 'react';
 import { modKeyLabel } from '../lib/a11y';
 import { cn } from '../lib/cn';
 import { useDraft } from '../lib/drafts';
+import { duplicateFinder, type DuplicateLead } from '../lib/duplicates';
 import { isValidEmail } from '../lib/email';
+import { formatDate } from '../lib/format';
 import { prefersReducedMotion } from '../lib/motion';
-import { isValidPhone } from '../lib/phone';
-import { CHANNEL_OPTIONS } from '../lib/stages';
+import { formatPhone, isValidPhone } from '../lib/phone';
+import { CHANNEL_OPTIONS, toneStyle } from '../lib/stages';
 import { isValidWebsite } from '../lib/website';
 import { useLeadStore } from '../store/leads';
 import { toast } from '../store/toasts';
@@ -39,14 +41,15 @@ const emptyForm = (): NewLeadInput => ({
   phone: '',
   email: '',
   website: '',
+  city: '',
   campaign: '',
   approach: '',
   method: 'call',
   note: '',
 });
 
-const TEXT_FIELDS = ['name', 'contactName', 'phone', 'email', 'website', 'campaign', 'approach', 'note'] as const;
-const isEmptyForm = (form: NewLeadInput) => !TEXT_FIELDS.some((key) => form[key].trim());
+const TEXT_FIELDS = ['name', 'contactName', 'phone', 'email', 'website', 'city', 'campaign', 'approach', 'note'] as const;
+const isEmptyForm = (form: NewLeadInput) => !TEXT_FIELDS.some((key) => (form[key] ?? '').trim());
 
 const textareaClass = cn(inputBase, 'block resize-none px-3.5 py-3 text-base leading-relaxed sm:text-[14.5px]');
 
@@ -56,10 +59,26 @@ const textareaClass = cn(inputBase, 'block resize-none px-3.5 py-3 text-base lea
  */
 function NewLeadForm({ onDone }: { onDone: () => void }) {
   const addLead = useLeadStore((s) => s.addLead);
+  const leads = useLeadStore((s) => s.leads);
+  const deleted = useLeadStore((s) => s.deleted);
   // Kept on this device as it's typed, so a lead started mid-call survives a closed dialog or a reloaded page
   const [form, setForm, forgetDraft, restored] = useDraft<NewLeadInput>('new-lead', emptyForm, isEmptyForm);
   const [errors, setErrors] = useState<FormErrors>({});
   const [noteOpen, setNoteOpen] = useState(() => Boolean(form.note.trim()));
+
+  // The lead this business already is, or was before it was deleted: checked as it's typed
+  const findDuplicate = useMemo(() => duplicateFinder(leads, deleted), [leads, deleted]);
+  const duplicate = useMemo(
+    () => findDuplicate({ name: form.name, phone: form.phone, email: form.email, website: form.website, city: form.city }),
+    [findDuplicate, form.name, form.phone, form.email, form.website, form.city],
+  );
+  // Added anyway, for this match only: another match asks again
+  const [allowed, setAllowed] = useState<string | null>(null);
+  const blocked = duplicate !== null && allowed !== duplicateKey(duplicate);
+  // The match that stopped a save: said again only while it's still the match
+  const [stoppedBy, setStoppedBy] = useState<string | null>(null);
+  const nudged = blocked && duplicate !== null && stoppedBy === duplicateKey(duplicate);
+  const noticeRef = useRef<HTMLDivElement>(null);
 
   const update = <K extends keyof NewLeadInput>(key: K, value: NewLeadInput[K]) => {
     setForm((current) => ({ ...current, [key]: value }));
@@ -79,12 +98,25 @@ function NewLeadForm({ onDone }: { onDone: () => void }) {
       document.getElementById(`new-lead-${firstError}`)?.focus();
       return;
     }
+    // Not saved twice: the notice says which lead it already is (or was), and adding it anyway is a click there
+    if (blocked && duplicate) {
+      setStoppedBy(duplicateKey(duplicate));
+      noticeRef.current?.scrollIntoView({ block: 'nearest', behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+      noticeRef.current?.focus();
+      return;
+    }
 
     const lead = addLead(form);
     forgetDraft();
     const ui = useUi.getState();
     // A new lead is "חדש": the leads show it, without a search, niche or status filter that would hide it
-    if (ui.query || (ui.campaignFilter && ui.campaignFilter !== lead.campaign) || (ui.statusFilter.length && !ui.statusFilter.includes('new'))) ui.resetFilters();
+    if (
+      ui.query ||
+      (ui.campaignFilter && ui.campaignFilter !== lead.campaign) ||
+      (ui.cityFilter && ui.cityFilter !== (lead.city ?? '')) ||
+      (ui.statusFilter.length && !ui.statusFilter.includes('new'))
+    )
+      ui.resetFilters();
     if (ui.boardTab !== 'new') ui.setBoardTab('new');
     ui.highlight([lead.id]);
     toast.success('הליד נוסף', lead.name);
@@ -130,6 +162,21 @@ function NewLeadForm({ onDone }: { onDone: () => void }) {
             </button>
           </p>
         )}
+        {duplicate && (
+          <DuplicateNotice
+            ref={noticeRef}
+            duplicate={duplicate}
+            nudged={nudged}
+            allowed={!blocked}
+            onOpen={() => {
+              // It's already a lead: this one isn't kept as a draft
+              forgetDraft();
+              onDone();
+              useUi.getState().openProfile(duplicate.id);
+            }}
+            onAllow={() => setAllowed(duplicateKey(duplicate))}
+          />
+        )}
         <div className="grid gap-7 md:grid-cols-2 md:gap-x-8">
           <FormSection titleId="new-lead-business" title="העסק" icon={Store}>
             <div className="grid gap-4">
@@ -154,6 +201,19 @@ function NewLeadForm({ onDone }: { onDone: () => void }) {
                   value={form.campaign}
                   onChange={(event) => update('campaign', event.target.value)}
                   placeholder="למשל: רופאי שיניים"
+                  className={fieldClass()}
+                />
+              </Field>
+              <Field label="עיר" htmlFor="new-lead-city">
+                <input
+                  id="new-lead-city"
+                  dir="auto"
+                  autoComplete="off"
+                  list="city-options"
+                  maxLength={60}
+                  value={form.city ?? ''}
+                  onChange={(event) => update('city', event.target.value)}
+                  placeholder="למשל: ירושלים"
                   className={fieldClass()}
                 />
               </Field>
@@ -262,10 +322,83 @@ function NewLeadForm({ onDone }: { onDone: () => void }) {
           </Button>
         </Dialog.Close>
         <Button type="submit" variant="primary" className="max-sm:flex-1">
-          הוספת הליד
+          {duplicate && !blocked ? 'הוספה בכל זאת' : 'הוספת הליד'}
           <Kbd className="ms-1 max-sm:hidden">{modKeyLabel} ↵</Kbd>
         </Button>
       </DialogFooter>
     </form>
+  );
+}
+
+const duplicateKey = (duplicate: DuplicateLead) => `${duplicate.deleted ? 'deleted' : 'lead'}:${duplicate.id}`;
+
+/**
+ * The lead this business already is, or was before it was deleted, and what they share. It isn't added again unless
+ * "להוסיף בכל זאת" is pressed (two branches with one name, say); a lead in the CRM opens instead.
+ */
+function DuplicateNotice({
+  ref,
+  duplicate,
+  nudged,
+  allowed,
+  onOpen,
+  onAllow,
+}: {
+  ref: Ref<HTMLDivElement>;
+  duplicate: DuplicateLead;
+  nudged: boolean;
+  allowed: boolean;
+  onOpen: () => void;
+  onAllow: () => void;
+}) {
+  const facts = [duplicate.city, duplicate.phone && formatPhone(duplicate.phone)].filter(Boolean);
+  const title = duplicate.deleted
+    ? `העסק הזה כבר היה ב-CRM ונמחק${duplicate.deletedAt ? ` ב-${formatDate(duplicate.deletedAt)}` : ''}`
+    : 'הליד הזה כבר קיים ב-CRM';
+  return (
+    <div
+      ref={ref}
+      tabIndex={-1}
+      role={nudged ? 'alert' : 'status'}
+      style={toneStyle(duplicate.deleted ? 'var(--st-lost)' : 'var(--st-no-answer)')}
+      className={cn('tone-panel flex flex-col gap-2.5 rounded-xl px-4 py-3 outline-none', nudged && 'ring-2 ring-[var(--tone)]')}
+    >
+      <div className="flex items-start gap-2.5">
+        <CopyCheck className="tone-text mt-0.5 size-4.5 shrink-0" aria-hidden />
+        <div className="min-w-0 flex-1">
+          <p className="text-[14px] font-semibold text-pretty">{title}</p>
+          <p className="mt-0.5 text-[13px] text-pretty text-fg-muted">
+            <bdi className="font-medium text-fg">{duplicate.name}</bdi>
+            {facts.map((fact) => (
+              <span key={fact}>
+                {' · '}
+                <bdi>{fact}</bdi>
+              </span>
+            ))}
+            {` (${duplicate.shared})`}
+            {duplicate.archived && ' · מסומן כלא רלוונטי'}
+          </p>
+          {allowed ? (
+            <p className="mt-1 text-[13px] text-fg-muted">
+              {duplicate.deleted ? 'הוא יתווסף כליד חדש.' : 'הוא יתווסף כליד נוסף, ליד הקיים.'}
+            </p>
+          ) : (
+            nudged && <p className="mt-1 text-[13px] font-medium">הליד לא נוסף, כדי שלא יהיה כפול.</p>
+          )}
+        </div>
+      </div>
+      {!allowed && (
+        <div className="flex flex-wrap items-center gap-2 ps-7">
+          {!duplicate.deleted && (
+            <Button size="sm" onClick={onOpen}>
+              פתיחת הליד הקיים
+            </Button>
+          )}
+          <Button size="sm" variant="ghost" onClick={onAllow}>
+            להוסיף בכל זאת
+          </Button>
+        </div>
+      )}
+    </div>
   );
 }

@@ -49,7 +49,8 @@ describe('reading pasted JSON', () => {
       { label: 'טלפון', keys: ['phone'] },
       { label: 'נישה', keys: ['categoryName', 'categories'] },
       { label: 'אתר', keys: ['website'] },
-      { label: 'כתובת', keys: ['street', 'city'] },
+      { label: 'עיר', keys: ['city'] },
+      { label: 'כתובת', keys: ['street'] },
       { label: 'דירוג', keys: ['totalScore'] },
     ]);
     // An empty field isn't worth a word; one with something in it that nothing reads is

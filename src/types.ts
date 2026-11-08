@@ -81,6 +81,10 @@ export interface Lead {
   email: string;
   /** A domain or http(s) address */
   website: string;
+  /** The city or town the business is in. Missing on leads saved before it existed (and from older servers). */
+  city?: string;
+  /** Its Google Maps listing, an http(s) address. Missing like city. */
+  mapsUrl?: string;
   /** Topic or niche of the batch the lead came in with, e.g. "Dentists" */
   campaign: string;
   /** How to talk to this lead */
@@ -384,11 +388,26 @@ export type Grade = 1 | 2 | 3 | 4;
 
 /** Details that can be edited directly. The stage only changes through actions. */
 export type LeadPatch = Partial<
-  Pick<Lead, 'name' | 'contactName' | 'phone' | 'email' | 'website' | 'campaign' | 'approach' | 'method' | 'currency'>
+  Pick<Lead, 'name' | 'contactName' | 'phone' | 'email' | 'website' | 'city' | 'mapsUrl' | 'campaign' | 'approach' | 'method' | 'currency'>
 > & {
   /** Any of the amounts; the rest stay as they are. Only on a closed deal. */
   deal?: Partial<DealTerms>;
 };
+
+/**
+ * A lead that was deleted, kept as what identified its business, so a new lead or an import can say it was in the
+ * CRM before (server/src/leads/identity.ts). The id is the deleted lead's.
+ */
+export interface DeletedLead {
+  id: string;
+  name: string;
+  phone: string;
+  email: string;
+  website: string;
+  city: string;
+  mapsUrl: string;
+  deletedAt: string;
+}
 
 export interface NewLeadInput {
   name: string;
@@ -396,6 +415,8 @@ export interface NewLeadInput {
   phone: string;
   email: string;
   website: string;
+  /** Missing from a form draft saved before cities existed */
+  city?: string;
   campaign: string;
   approach: string;
   method: ContactMethod;
@@ -637,6 +658,6 @@ export interface NewProspectSearch {
 export interface ProspectImport {
   /** The new leads, at Cold Call: they join the Daily 10 pool */
   created: Lead[];
-  /** Businesses that weren't added: imported before, already a lead, or gone */
-  skipped: { id: string; reason: 'imported' | 'exists' | 'missing'; leadId?: string }[];
+  /** Businesses that weren't added: imported before, already a lead, a lead that was deleted, or gone */
+  skipped: { id: string; reason: 'imported' | 'exists' | 'deleted' | 'missing'; leadId?: string }[];
 }

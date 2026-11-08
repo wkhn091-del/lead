@@ -1,6 +1,7 @@
-import { Compass, ExternalLink, Mail, MessageCircle, PhoneCall, Store, UserRound, type LucideIcon } from 'lucide-react';
+import { Compass, ExternalLink, Mail, MapPinned, MessageCircle, PhoneCall, Store, UserRound, type LucideIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { isValidEmail } from '../../lib/email';
+import { isValidMapsUrl, mapsLink } from '../../lib/maps';
 import { isValidPhone, telHref, whatsAppHref } from '../../lib/phone';
 import { CHANNEL_OPTIONS } from '../../lib/stages';
 import { isValidWebsite, websiteHref } from '../../lib/website';
@@ -27,7 +28,7 @@ export function DetailsPanel({ lead }: { lead: Lead }) {
       <div className="flex min-w-0 flex-col gap-8">
         <FormSection titleId={fieldId('about')} title="העסק" icon={Store}>
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="שם העסק" htmlFor={fieldId('name')}>
+            <Field label="שם העסק" htmlFor={fieldId('name')} className="sm:col-span-2">
               <InlineInput
                 id={fieldId('name')}
                 dir="auto"
@@ -48,6 +49,18 @@ export function DetailsPanel({ lead }: { lead: Lead }) {
                 onCommit={(campaign) => updateLead(lead.id, { campaign })}
               />
             </Field>
+            <Field label="עיר" htmlFor={fieldId('city')}>
+              <InlineInput
+                id={fieldId('city')}
+                dir="auto"
+                autoComplete="off"
+                list="city-options"
+                placeholder="למשל: ירושלים"
+                value={lead.city ?? ''}
+                validate={(text) => (text.length <= 60 ? null : 'עד 60 תווים.')}
+                onCommit={(city) => updateLead(lead.id, { city })}
+              />
+            </Field>
             <ContactRow label="האתר הנוכחי" id={fieldId('website')} className="sm:col-span-2">
               <InlineInput
                 id={fieldId('website')}
@@ -61,6 +74,20 @@ export function DetailsPanel({ lead }: { lead: Lead }) {
                 onCommit={(website) => updateLead(lead.id, { website })}
               />
               <ContactLink href={websiteHref(lead.website)} label="פתיחה" icon={ExternalLink} missing="קודם צריך כתובת אתר" external />
+            </ContactRow>
+            <ContactRow label="גוגל מפות" id={fieldId('maps')} className="sm:col-span-2">
+              <InlineInput
+                id={fieldId('maps')}
+                inputMode="url"
+                autoComplete="off"
+                dir="ltr"
+                placeholder="https://maps.app.goo.gl/…"
+                value={lead.mapsUrl ?? ''}
+                className="min-w-0 flex-1 [&_input]:text-right"
+                validate={(text) => (!text || isValidMapsUrl(text) ? null : 'נא להדביק קישור שמתחיל ב-https://')}
+                onCommit={(mapsUrl) => updateLead(lead.id, { mapsUrl })}
+              />
+              <MapsButton lead={lead} />
             </ContactRow>
           </div>
         </FormSection>
@@ -140,6 +167,21 @@ export function DetailsPanel({ lead }: { lead: Lead }) {
         <DealSection lead={lead} />
       </div>
     </div>
+  );
+}
+
+/** Opens the stored listing, or, with none, a search for the business by its name and city */
+function MapsButton({ lead }: { lead: Lead }) {
+  const maps = mapsLink(lead);
+  return (
+    <ContactLink
+      href={maps?.href ?? null}
+      label={maps?.search ? 'חיפוש' : 'פתיחה'}
+      icon={MapPinned}
+      iconColor="var(--st-lost)"
+      missing="קודם צריך קישור למפות, או עיר"
+      external
+    />
   );
 }
 

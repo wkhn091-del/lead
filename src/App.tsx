@@ -23,7 +23,7 @@ import { ViewTabs } from './components/ViewTabs';
 import { useHotkeys } from './hooks/useHotkeys';
 import { cn } from './lib/cn';
 import { drafts } from './lib/drafts';
-import { campaignCounts } from './lib/leads';
+import { campaignCounts, cityCounts } from './lib/leads';
 import { EASE_OUT } from './lib/motion';
 import { useDashboard } from './store/dashboard';
 import { useLeadStore } from './store/leads';
@@ -168,6 +168,7 @@ function Dashboard() {
       <WhatsAppDialog />
       <CommandPalette />
       <CampaignOptions />
+      <CityOptions />
     </>
   );
 }
@@ -221,6 +222,19 @@ function CampaignOptions() {
     <datalist id="campaign-options">
       {campaigns.map((campaign) => (
         <option key={campaign.name} value={campaign.name} />
+      ))}
+    </datalist>
+  );
+}
+
+/** Suggestions for every city field: the cities the leads are already in */
+function CityOptions() {
+  const leads = useLeadStore((s) => s.leads);
+  const cities = useMemo(() => cityCounts(leads), [leads]);
+  return (
+    <datalist id="city-options">
+      {cities.map((city) => (
+        <option key={city.name} value={city.name} />
       ))}
     </datalist>
   );

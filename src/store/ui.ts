@@ -21,6 +21,8 @@ interface UiState {
   query: string;
   /** Empty string for every campaign */
   campaignFilter: string;
+  /** Empty for every city */
+  cityFilter: string;
   /** The status a phone shows on the leads board, one at a time (wider screens show them all) */
   boardTab: BoardColumn;
   /** Whether the board shows the leads marked not relevant, in a column of their own */
@@ -54,6 +56,7 @@ interface UiState {
   setView: (view: View) => void;
   setQuery: (query: string) => void;
   setCampaignFilter: (campaign: string) => void;
+  setCityFilter: (city: string) => void;
   setBoardTab: (tab: BoardColumn) => void;
   setShowArchived: (show: boolean) => void;
   setLeadsLayout: (layout: LeadsLayout) => void;
@@ -99,6 +102,7 @@ export const useUi = create<UiState>()((set) => ({
   view: readView(),
   query: '',
   campaignFilter: '',
+  cityFilter: '',
   boardTab: readBoardTab(),
   showArchived: false,
   leadsLayout: readLayout(),
@@ -127,6 +131,7 @@ export const useUi = create<UiState>()((set) => ({
   },
   setQuery: (query) => set({ query }),
   setCampaignFilter: (campaignFilter) => set({ campaignFilter }),
+  setCityFilter: (cityFilter) => set({ cityFilter }),
   setBoardTab: (boardTab) => {
     safeStorage.set(BOARD_TAB_KEY, boardTab);
     set({ boardTab, ...(boardTab === 'archived' ? { showArchived: true } : {}) });
@@ -143,7 +148,7 @@ export const useUi = create<UiState>()((set) => ({
   setStatusFilter: (statusFilter) => set({ statusFilter }),
   setAddedFilter: (addedFilter) => set({ addedFilter }),
   setTableSorting: (tableSorting) => set({ tableSorting }),
-  resetFilters: () => set({ query: '', campaignFilter: '', statusFilter: [], addedFilter: 'all' }),
+  resetFilters: () => set({ query: '', campaignFilter: '', cityFilter: '', statusFilter: [], addedFilter: 'all' }),
   setDetailsId: (detailsId) => set({ detailsId }),
   openCallLog: (callLogId) => set({ callLogId }),
   closeCallLog: () => set({ callLogId: null }),

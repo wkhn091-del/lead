@@ -36,6 +36,8 @@ const lead: LeadRecord = {
   phone: '050-000-0142',
   email: 'moshe@arbel.example',
   website: 'arbel-olive.example',
+  city: '',
+  mapsUrl: '',
   campaign: 'Food producers',
   approach: 'Lead with the free homepage mockup.',
   method: 'call',

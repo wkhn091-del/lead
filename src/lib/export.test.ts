@@ -16,7 +16,8 @@ describe('exporting the leads', () => {
     const sheet = strFromU8(files['xl/worksheets/sheet1.xml']);
     expect(sheet).toContain('<sheetView rightToLeft="1"');
     expect(sheet).toContain('state="frozen"');
-    expect(sheet).toContain(`<autoFilter ref="A1:P${leads.length + 1}"/>`);
+    // A filter on every column, the last one (R) being the Google Maps link
+    expect(sheet).toContain(`<autoFilter ref="A1:R${leads.length + 1}"/>`);
     expect(sheet).toContain('R&amp;D &lt;שיפוצים&gt; &quot;בע״מ&quot;</t>');
     // A phone number stays text, so its leading 0 does too
     expect(sheet).toContain('<t xml:space="preserve">054-123-4567</t>');

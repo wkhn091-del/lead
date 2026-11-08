@@ -1,7 +1,8 @@
 import { motion } from 'motion/react';
-import { Ellipsis, MessageCircle, PhoneCall, UserRound } from 'lucide-react';
+import { Ellipsis, MapPin, MessageCircle, PhoneCall, UserRound } from 'lucide-react';
 import { cardLine } from '../../lib/board';
 import { cn } from '../../lib/cn';
+import { mapsLink } from '../../lib/maps';
 import { formatPhone } from '../../lib/phone';
 import { useUi } from '../../store/ui';
 import type { Lead } from '../../types';
@@ -24,6 +25,8 @@ export function LeadCard({ lead }: { lead: Lead }) {
   const openPalette = useUi((s) => s.openPalette);
   const archived = Boolean(lead.archivedAt);
   const whatsApp = useWhatsAppLink(lead);
+  const maps = mapsLink(lead);
+  const city = lead.city?.trim() ?? '';
 
   return (
     <motion.li
@@ -77,6 +80,20 @@ export function LeadCard({ lead }: { lead: Lead }) {
 
       <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
         <CampaignTag campaign={lead.campaign} className="h-5 text-[11.5px]" />
+        {/* The city, which opens the business on Google Maps (a lead with a listing and no city gets "מפות") */}
+        {maps && (
+          <a
+            href={maps.href}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={maps.search ? `חיפוש בגוגל מפות: ${lead.name}, ${city}` : 'גוגל מפות'}
+            aria-label={city ? `${city}, בגוגל מפות` : 'גוגל מפות'}
+            className="inline-flex min-w-0 items-center gap-0.5 rounded text-[12px] text-fg-muted underline-offset-4 hover:text-fg hover:underline focus-visible:outline-2 focus-visible:outline-focus"
+          >
+            <MapPin className="size-3 shrink-0" style={{ color: 'var(--st-lost)' }} aria-hidden />
+            <span dir="auto" className="truncate">{city || 'מפות'}</span>
+          </a>
+        )}
         <span className="min-w-0 truncate text-[12px] text-fg-faint">{cardLine(lead)}</span>
       </div>
 

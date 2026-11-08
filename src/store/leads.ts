@@ -9,7 +9,7 @@ import { jsonBatches } from '../lib/import/json';
 import { patchLead, patchRevert } from '../lib/leads';
 import { overlayLeads, type OutboxOp } from '../lib/outbox';
 import { applyAction, timelineEntryFor, undoAction } from '../lib/workflow';
-import type { ActionType, DailyQueue, Lead, LeadPatch, NewLead, NewLeadInput, StepDetails } from '../types';
+import type { ActionType, DailyQueue, DeletedLead, Lead, LeadPatch, NewLead, NewLeadInput, StepDetails } from '../types';
 import { handleOutbox, useSync } from './sync';
 import { useTimeline } from './timeline';
 import { toast } from './toasts';
@@ -29,6 +29,8 @@ export interface ImportOutcome {
 /** Where a JSON import stands: what it saved and skipped so far, and how far through the paste it got */
 export interface JsonImportOutcome {
   created: Lead[];
+  /** Leads that were already in the CRM, completed from the paste: the city, Maps link or website they lacked */
+  updated: Lead[];
   /** By the item's place in the whole paste, from 0 */
   skipped: JsonSkip[];
   /** Fields the items had that aren't read */
@@ -51,6 +53,13 @@ interface LeadsState {
   pending: number;
   /** When the list last came from the server (ms), or null while it's only the copy kept on this device */
   syncedAt: number | null;
+  /**
+   * The leads deleted before, as what identified each business, so adding a lead or pasting a list can say it was
+   * in the CRM (lib/duplicates.ts). Empty until loaded, and when it couldn't be.
+   */
+  deleted: DeletedLead[];
+  /** Loads the deleted leads. Quiet: without them nothing is said about deleted ones (the server's import still checks). */
+  loadDeleted: () => Promise<void>;
   /** Loads the list. With leads already on screen it's quiet: they stay while the server answers, or if it doesn't. */
   load: () => Promise<void>;
   /** Shows the copy kept on this device (store/offline.ts) until the server answers */
@@ -124,6 +133,25 @@ export const useLeadStore = create<LeadsState>()((set, get) => {
       return { leads };
     });
 
+  /** What the server keeps of leads it deletes, kept here too so it counts before the list comes again */
+  const rememberDeleted = (gone: readonly Lead[]) => {
+    const real = gone.filter((lead) => !isSampleLead(lead));
+    if (!real.length) return;
+    const deletedAt = new Date().toISOString();
+    const ids = new Set(real.map((lead) => lead.id));
+    set((state) => ({
+      deleted: [
+        ...real.map(({ id, name, phone, email, website, city, mapsUrl }) => ({ id, name, phone, email, website, city: city ?? '', mapsUrl: mapsUrl ?? '', deletedAt })),
+        ...state.deleted.filter((item) => !ids.has(item.id)),
+      ],
+    }));
+  };
+  /** Leads back in the CRM (a deletion undone, or refused) */
+  const forgetDeleted = (ids: readonly string[]) => {
+    const back = new Set(ids);
+    set((state) => (state.deleted.some((item) => back.has(item.id)) ? { deleted: state.deleted.filter((item) => !back.has(item.id)) } : state));
+  };
+
   /** Keeps a change in the outbox and sends it. Resolves to whether the server took it. */
   const send = (op: OutboxOp, rollback?: () => void) => useSync.getState().enqueue(op, { rollback }).saved;
   /** A lead from the server, with the changes to it that are still waiting shown on top */
@@ -151,7 +179,11 @@ export const useLeadStore = create<LeadsState>()((set, get) => {
     if (!entry) return;
     clearTimeout(entry.timer);
     pendingRemovals.delete(id);
-    void send({ kind: 'remove-lead', leadId: id }, () => insertAt(entry.lead, entry.index));
+    rememberDeleted([entry.lead]);
+    void send({ kind: 'remove-lead', leadId: id }, () => {
+      insertAt(entry.lead, entry.index);
+      forgetDeleted([id]);
+    });
   }
 
   function restoreLead(lead: Lead, index: number) {
@@ -163,7 +195,8 @@ export const useLeadStore = create<LeadsState>()((set, get) => {
       return;
     }
     // The delete was already handed to the outbox (the page was hidden): take it back if it's still waiting,
-    // otherwise save the lead again.
+    // otherwise save the lead again (the server then forgets it was deleted).
+    forgetDeleted([lead.id]);
     if (useSync.getState().cancel((op) => op.kind === 'remove-lead' && op.leadId === lead.id)) return;
     void send({ kind: 'create-lead', lead: { ...lead, notes: [] } }, () => dropLeads((item) => item.id === lead.id));
   }
@@ -244,6 +277,7 @@ export const useLeadStore = create<LeadsState>()((set, get) => {
     dailyError: null,
     pending: 0,
     syncedAt: null,
+    deleted: [],
 
     async load() {
       const showing = get().leads.length > 0 && get().loadState === 'ready';
@@ -252,8 +286,21 @@ export const useLeadStore = create<LeadsState>()((set, get) => {
         const leads = await repository.list();
         // Changes still on their way to the server stay on screen
         set({ leads: overlayLeads(leads, useSync.getState().pendingOps()), loadState: 'ready', syncedAt: Date.now() });
+        void get().loadDeleted();
       } catch (error) {
         set({ loadState: showing ? 'ready' : 'error', loadError: messageOf(error) });
+      }
+    },
+
+    async loadDeleted() {
+      const asked = new Date().toISOString();
+      try {
+        const deleted = await repository.deletedLeads();
+        const ids = new Set(deleted.map((item) => item.id));
+        // Leads deleted here while the server answered stay
+        set((state) => ({ deleted: [...state.deleted.filter((item) => !ids.has(item.id) && item.deletedAt >= asked), ...deleted] }));
+      } catch {
+        // Nothing said about deleted leads until the next load
       }
     },
 
@@ -283,6 +330,7 @@ export const useLeadStore = create<LeadsState>()((set, get) => {
     addLead(input) {
       const now = new Date().toISOString();
       const firstNote = input.note.trim();
+      const city = (input.city ?? '').trim().slice(0, 60);
       const lead: NewLead = {
         id: createId(),
         name: input.name.trim(),
@@ -290,6 +338,8 @@ export const useLeadStore = create<LeadsState>()((set, get) => {
         phone: input.phone.trim(),
         email: input.email.trim(),
         website: input.website.trim(),
+        // Sent only when there is one, so a server from before cities still takes the lead
+        ...(city ? { city } : {}),
         campaign: input.campaign.trim(),
         approach: input.approach.trim(),
         method: input.method,
@@ -341,6 +391,7 @@ export const useLeadStore = create<LeadsState>()((set, get) => {
     async importJson(items, { from, mapping, onProgress } = {}) {
       const outcome: JsonImportOutcome = {
         created: [...(from?.created ?? [])],
+        updated: [...(from?.updated ?? [])],
         skipped: [...(from?.skipped ?? [])],
         ignoredFields: [...(from?.ignoredFields ?? [])],
         done: from?.done ?? 0,
@@ -368,8 +419,19 @@ export const useLeadStore = create<LeadsState>()((set, get) => {
           }
           for (const field of result.ignoredFields) if (!outcome.ignoredFields.includes(field)) outcome.ignoredFields.push(field);
           outcome.created.push(...result.created);
+          const filled = result.updated ?? [];
+          for (const lead of filled) {
+            // A lead an earlier part of this paste made is still a new one, now with more details
+            const list = outcome.created.some((item) => item.id === lead.id) ? outcome.created : outcome.updated;
+            const at = list.findIndex((item) => item.id === lead.id);
+            if (at >= 0) list[at] = lead;
+            else list.push(lead);
+          }
           const ids = new Set(result.created.map((lead) => lead.id));
-          set((state) => ({ leads: [...result.created, ...state.leads.filter((lead) => !ids.has(lead.id))] }));
+          const filledById = new Map(filled.map((lead) => [lead.id, lead]));
+          set((state) => ({
+            leads: [...result.created, ...state.leads.filter((lead) => !ids.has(lead.id)).map((lead) => filledById.get(lead.id) ?? lead)],
+          }));
           outcome.done += batch.length;
           onProgress?.(outcome.done);
         }
@@ -467,9 +529,11 @@ export const useLeadStore = create<LeadsState>()((set, get) => {
       const removed = get().leads.filter((lead) => doomed.has(lead.id));
       if (removed.length === 0) return;
       dropLeads((lead) => doomed.has(lead.id));
-      void send({ kind: 'remove-leads', leadIds: removed.map((lead) => lead.id) }, () =>
-        set((state) => ({ leads: [...removed, ...state.leads.filter((lead) => !doomed.has(lead.id))] })),
-      );
+      rememberDeleted(removed);
+      void send({ kind: 'remove-leads', leadIds: removed.map((lead) => lead.id) }, () => {
+        set((state) => ({ leads: [...removed, ...state.leads.filter((lead) => !doomed.has(lead.id))] }));
+        forgetDeleted([...doomed]);
+      });
     },
 
     addSampleLeads() {
@@ -500,7 +564,7 @@ export const useLeadStore = create<LeadsState>()((set, get) => {
       for (const { timer } of pendingRemovals.values()) clearTimeout(timer);
       pendingRemovals.clear();
       useTimeline.getState().reset();
-      set({ leads: [], loadState: 'idle', loadError: null, daily: null, dailyState: 'idle', dailyError: null, syncedAt: null });
+      set({ leads: [], loadState: 'idle', loadError: null, daily: null, dailyState: 'idle', dailyError: null, syncedAt: null, deleted: [] });
     },
   };
 });

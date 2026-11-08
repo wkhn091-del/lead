@@ -98,7 +98,7 @@ export function createApp(services: AppServices, clock: () => Date = () => new D
   });
   api.use(
     '/leads',
-    createLeadsRouter(stores, storage, clock, transcription, config.countryCode),
+    createLeadsRouter(stores, storage, clock, transcription, config.countryCode, config.timeZone),
     createTimelineRouter(stores, clock),
     leadMedia,
     createCoachRouter(stores, coach, coachSettings, clock),

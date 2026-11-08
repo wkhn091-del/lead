@@ -28,7 +28,7 @@ function phoneHas(lead: Lead, digits: string): boolean {
 }
 
 /**
- * Whether a lead matches every word of a search: in the business, contact, niche or email, or digits in its phone
+ * Whether a lead matches every word of a search: in the business, contact, niche, city or email, or digits in its phone
  * however they were typed (054…, +972 54…, 054 123 4567)
  */
 export function matchesSearch(lead: Lead, query: string): boolean {
@@ -36,7 +36,7 @@ export function matchesSearch(lead: Lead, query: string): boolean {
   if (PHONE_LIKE.test(query.trim()) && phoneHas(lead, phoneDigits(query))) return true;
   const words = normalize(query).split(' ').filter(Boolean);
   if (!words.length) return true;
-  const text = normalize([lead.name, lead.contactName, lead.campaign, lead.email].join(' '));
+  const text = normalize([lead.name, lead.contactName, lead.campaign, lead.city ?? '', lead.email].join(' '));
   return words.every((word) => text.includes(word) || (PHONE_LIKE.test(word) && phoneHas(lead, phoneDigits(word))));
 }
 

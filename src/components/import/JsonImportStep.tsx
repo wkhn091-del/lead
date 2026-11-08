@@ -21,7 +21,7 @@ type Phase =
   | { kind: 'saving'; done: number; total: number }
   /** The connection dropped or the server failed partway: what was saved stays, the rest can be sent again */
   | { kind: 'stopped'; outcome: JsonImportOutcome; items: unknown[]; mapping: JsonMapping }
-  /** Done, with leads skipped or fields not read: shown before closing */
+  /** Done, with leads skipped or completed, or fields not read: shown before closing */
   | { kind: 'report'; outcome: JsonImportOutcome };
 
 const PLACEHOLDER = `[
@@ -39,11 +39,12 @@ const REPORT_LIMIT = 200;
 
 const REASONS: Record<JsonSkipReason, { chip: string; tone: string; summary: (n: number) => string }> = {
   exists: { chip: 'כבר ב-CRM', tone: 'var(--st-no-answer)', summary: (n) => (n === 1 ? 'ליד אחד כבר שמור ב-CRM' : `${n} כבר שמורים ב-CRM`) },
-  repeated: { chip: 'כפול ברשימה', tone: 'var(--st-no-answer)', summary: (n) => (n === 1 ? 'מספר אחד חוזר ברשימה' : `${n} מספרים חוזרים ברשימה`) },
+  deleted: { chip: 'נמחק בעבר', tone: 'var(--st-lost)', summary: (n) => (n === 1 ? 'עסק אחד כבר היה ב-CRM ונמחק' : `${n} כבר היו ב-CRM ונמחקו`) },
+  repeated: { chip: 'כפול ברשימה', tone: 'var(--st-no-answer)', summary: (n) => (n === 1 ? 'עסק אחד חוזר ברשימה' : `${n} עסקים חוזרים ברשימה`) },
   'no-phone': { chip: 'בלי טלפון', tone: 'var(--danger)', summary: (n) => (n === 1 ? 'ליד אחד בלי טלפון תקין' : `${n} בלי טלפון תקין`) },
   invalid: { chip: 'לא תקין', tone: 'var(--danger)', summary: (n) => (n === 1 ? 'פריט אחד לא תקין' : `${n} פריטים לא תקינים`) },
 };
-const REASON_ORDER: JsonSkipReason[] = ['exists', 'repeated', 'no-phone', 'invalid'];
+const REASON_ORDER: JsonSkipReason[] = ['exists', 'deleted', 'repeated', 'no-phone', 'invalid'];
 
 /** Field names inside a Hebrew sentence, kept left to right as one run */
 const fieldList = (fields: readonly string[]) => `⁦${fields.join(', ')}⁩`;
@@ -134,7 +135,7 @@ export function JsonImportStep({ text, onChange, switcher, onLockChange, onClose
     const outcome = await importJson(items, { from, mapping: map, onProgress: (done) => setPhase({ kind: 'saving', done, total: items.length }) });
     onLockChange(false);
     if (outcome.error) setPhase({ kind: 'stopped', outcome, items, mapping: map });
-    else if (outcome.skipped.length || outcome.ignoredFields.length) setPhase({ kind: 'report', outcome });
+    else if (outcome.skipped.length || outcome.ignoredFields.length || outcome.updated.length) setPhase({ kind: 'report', outcome });
     else finish(outcome);
   }
 
@@ -159,7 +160,7 @@ export function JsonImportStep({ text, onChange, switcher, onLockChange, onClose
     <div className="flex min-h-0 flex-1 flex-col">
       <DialogHeading
         title="ייבוא לידים"
-        description="מדביקים JSON של לידים או פותחים קובץ, למשל מדפי זהב או מגוגל מפות. ליד נשמר רק אם מספר הטלפון שלו חדש: מספר שכבר יש ב-CRM, או שחוזר ברשימה, מדולג."
+        description="מדביקים JSON של לידים או פותחים קובץ, למשל מדפי זהב או מגוגל מפות. נשמרים רק עסקים חדשים: עסק שכבר ב-CRM, שהיה בו ונמחק, או שחוזר ברשימה (אותו טלפון, אותו מקום בגוגל מפות, אותו אתר, או אותו שם באותה עיר) מדולג."
         closable={!busy}
       />
       <DialogBody className="flex flex-col gap-3">
@@ -373,28 +374,42 @@ export function JsonImportStep({ text, onChange, switcher, onLockChange, onClose
   );
 }
 
-/** What was imported, and each skipped item with the reason */
+const amount = (n: number) => n.toLocaleString(appConfig.locale);
+
+/** "נוספו 3 לידים, והושלמו פרטים ב-64", "הושלמו פרטים ב-66 לידים", "נוסף ליד אחד" */
+function reportTitle(created: number, updated: number): string {
+  const added = created === 1 ? 'נוסף ליד אחד' : `נוספו ${amount(created)} לידים`;
+  if (updated === 0) return created === 0 ? 'לא נוסף אף ליד' : added;
+  if (created === 0) return updated === 1 ? 'הושלמו פרטים בליד אחד' : `הושלמו פרטים ב-${amount(updated)} לידים`;
+  return `${added}, והושלמו פרטים ב${updated === 1 ? 'ליד אחד' : `-${amount(updated)}`}`;
+}
+
+/** What was imported, what leads already here got, and each skipped item with the reason */
 function Report({ outcome, onAgain, onDone }: { outcome: JsonImportOutcome; onAgain: () => void; onDone: () => void }) {
   const created = outcome.created.length;
+  const updated = outcome.updated.length;
+  const skipped = outcome.skipped.length;
   const byReason = REASON_ORDER.map((reason) => ({ reason, n: outcome.skipped.filter((item) => item.reason === reason).length })).filter(
     ({ n }) => n > 0,
   );
+  const description = [
+    updated > 0 && 'לידים שכבר היו קיבלו את מה שחסר להם: טלפון, עיר, קישור לגוגל מפות או אתר. שום פרט קיים לא שונה.',
+    skipped === 0
+      ? updated === 0 && 'כל הלידים נוספו.'
+      : skipped === 1
+        ? 'ליד אחד דולג, והסיבה כתובה לידו.'
+        : `${amount(skipped)} דולגו, והסיבה כתובה ליד כל אחד.`,
+  ]
+    .filter(Boolean)
+    .join(' ');
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <DialogHeading
-        title={created === 0 ? 'לא נוסף אף ליד' : created === 1 ? 'נוסף ליד אחד' : `נוספו ${created.toLocaleString(appConfig.locale)} לידים`}
-        description={
-          outcome.skipped.length === 0
-            ? 'כל הלידים נוספו.'
-            : outcome.skipped.length === 1
-              ? 'ליד אחד דולג, והסיבה כתובה לידו.'
-              : `${outcome.skipped.length.toLocaleString(appConfig.locale)} דולגו, והסיבה כתובה ליד כל אחד.`
-        }
-      />
+      <DialogHeading title={reportTitle(created, updated)} description={description} />
       <DialogBody className="flex flex-col gap-4">
-        {byReason.length > 0 && (
+        {(byReason.length > 0 || updated > 0) && (
           <div className="flex flex-wrap gap-1.5">
+            {updated > 0 && <Chip tone="var(--st-won)">{updated === 1 ? 'ליד אחד הושלם' : `${amount(updated)} הושלמו`}</Chip>}
             {byReason.map(({ reason, n }) => (
               <Chip key={reason} tone={REASONS[reason].tone}>
                 {REASONS[reason].summary(n)}
